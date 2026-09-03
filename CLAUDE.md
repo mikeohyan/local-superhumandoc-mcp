@@ -21,6 +21,22 @@ Use the `rfc` skill (`.claude/skills/rfc/`) for anything that touches an RFC:
 allocating a number, writing one, or moving one between statuses. The full
 process is specified by the `rfc-process` topic.
 
+## Evidence and reference material live in `docs/`
+
+`docs/reference/` holds distilled findings — API behaviour, constants, formats —
+that an implementer consults while writing code. `docs/validation/` holds
+runnable test plans, with a Results section filled in as they are run. Read
+`docs/` when a decision already made in `_rfc/` needs the evidence behind it, or
+when writing client code that depends on undocumented API behaviour. This split
+is decided by the `evidence-location` topic.
+
+Files under `docs/` are mutable, unversioned, and corrected in place as facts
+are learned — the opposite of a frozen RFC body. The boundary is directional:
+**nothing in `docs/` is authoritative for a decision.** A `docs/` file may
+record that the API's rate limit is five requests per ten seconds; only an RFC
+may say the client therefore self-throttles. When a `docs/` file starts
+asserting a choice rather than a fact, that choice belongs in an RFC.
+
 Rules that apply to every session:
 
 - **Superpowers writes its specs to `_rfc/`, not `docs/superpowers/specs/`.**
