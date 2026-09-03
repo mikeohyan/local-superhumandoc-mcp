@@ -1,4 +1,4 @@
-# Secrets — never commit. RFC 0002 requires the API token to live only in .env.
+# Secrets — never commit. RFC 0008 requires the API token to live only in .env.
 .env
 .env.*
 !.env.example

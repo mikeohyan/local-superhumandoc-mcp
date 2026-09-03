@@ -16,8 +16,8 @@ cp .env.example .env    # then fill in your token and document ID
 ```
 
 `.env` is gitignored and must never be committed. The API token is a bearer
-token in UUID form; see RFC 0002 for the authentication scheme, the pinned API
-version, and the documented rate limits.
+token in UUID form; see RFC 0008 for the authentication scheme, the pinned API
+version, and why the published rate limits are treated as advisory.
 
 Further setup steps will be added here once the server exists.
 
@@ -35,8 +35,9 @@ Worth reading first:
 
 - **RFC 0001** — the RFC process itself: numbering, the frozen-body rule, and
   how a decision is superseded rather than rewritten.
-- **RFC 0002** — the pinned Superhuman Docs API version, base URL, auth scheme,
-  rate limits, and how to detect upstream drift.
+- **RFC 0008** — the pinned Superhuman Docs API version, base URL, auth scheme,
+  how to detect upstream drift, and why the published rate limits are advisory
+  rather than contractual. Supersedes RFC 0002.
 
 ## Working in this repository with Claude Code
 

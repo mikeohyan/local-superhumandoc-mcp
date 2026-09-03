@@ -1,11 +1,11 @@
 ---
 rfc: 0002
 title: Pin development to Superhuman Docs API v1.6.0 and track spec drift
-status: Accepted
+status: Superseded
 created: 2026-09-03
 decided: 2026-09-03
 supersedes:
-superseded_by:
+superseded_by: 0008
 commits: []
 tags: [api, dependencies, superhuman-docs]
 ---

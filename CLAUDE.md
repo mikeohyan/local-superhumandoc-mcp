@@ -6,7 +6,7 @@ A locally run MCP server, written in Python and managed with `uv`, that exposes
 a specific Superhuman Docs document to Claude and Claude Code. Credentials come
 from a per-project `.env` and are never committed.
 
-The API surface this project targets is pinned in RFC 0002 — read it before
+The API surface this project targets is pinned in RFC 0008 — read it before
 writing any client code, and do not re-derive the version, base URL, or auth
 scheme from the web.
 
