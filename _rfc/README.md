@@ -9,11 +9,12 @@ specified in RFC 0001; the operating manual is the `rfc` skill in
 
 ## In flight — `_rfc/`
 
-Decided, not yet shipped.
+Proposed and Accepted: decided or awaiting decision, not yet shipped.
 
 | # | Title | Status | Decided | Path |
 |---|---|---|---|---|
 | 0002 | Pin development to Superhuman Docs API v1.6.0 and track spec drift | Accepted | 2026-09-03 | `_rfc/0002-superhuman-docs-api-version-lock.md` |
+| 0003 | Keep empirical evidence and reference material in `docs/`, separate from decisions in `_rfc/` | Proposed | — | `_rfc/0003-evidence-and-reference-material.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
