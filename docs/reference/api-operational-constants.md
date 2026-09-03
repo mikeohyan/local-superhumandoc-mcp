@@ -6,9 +6,10 @@
 
 This file records **what is true** about the API's operational behaviour: rate-limit
 buckets, retry semantics, size ceilings, the export state machine, and the failure
-modes that are not in the specification. Per RFC 0003, nothing here is authoritative
-for a decision — the constants table below is a set of **recommended starting values
-with their justification**, not a commitment. Only an RFC may say the client
+modes that are not in the specification. Per the `evidence-location` topic (see
+`_rfc/README.md`), nothing here is authoritative for a decision — the constants
+table below is a set of **recommended starting values with their
+justification**, not a commitment. Only an RFC may say the client
 therefore throttles, chunks, or polls a particular way.
 
 Corrections belong in place. This file is mutable.

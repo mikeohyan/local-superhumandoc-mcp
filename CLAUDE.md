@@ -6,9 +6,9 @@ A locally run MCP server, written in Python and managed with `uv`, that exposes
 a specific Superhuman Docs document to Claude and Claude Code. Credentials come
 from a per-project `.env` and are never committed.
 
-The API surface this project targets is pinned in RFC 0008 — read it before
-writing any client code, and do not re-derive the version, base URL, or auth
-scheme from the web.
+The API surface this project targets is pinned by the `upstream-api` topic. Look
+it up in `_rfc/README.md` and read the RFC it names before writing any client
+code, and do not re-derive the version, base URL, or auth scheme from the web.
 
 ## Design decisions live in `_rfc/`
 
@@ -19,7 +19,7 @@ both. `_rfc/archive/retired/` is history only.
 
 Use the `rfc` skill (`.claude/skills/rfc/`) for anything that touches an RFC:
 allocating a number, writing one, or moving one between statuses. The full
-process is specified in RFC 0001.
+process is specified by the `rfc-process` topic.
 
 Rules that apply to every session:
 
@@ -35,6 +35,14 @@ Rules that apply to every session:
   Alternatives considered, or Consequences after acceptance — supersede the RFC
   instead. Frontmatter (`status`, `decided`, `superseded_by`, `commits`) stays
   living, and the shipping session fills in Implementation notes.
+- **Cite decisions by topic, never by number, in any living document.** This
+  file, both `README.md` files, `.env.example`, `.gitignore`, everything under
+  `.claude/skills/` and everything under `docs/` describe how the project works
+  *now*, so they name a topic and let `_rfc/README.md` resolve it. An RFC number
+  in one of them rots the moment that RFC is superseded. RFC bodies are the
+  exception — they are frozen records, and a number in one is correct as
+  history. Code is cited the same way: path plus symbol, never a line number.
+  See the `doc-conventions` topic.
 - **Move RFC files with `git mv`, never plain `mv`.** Every transition edits
   frontmatter in the same commit as the move, which is exactly where git's
   rename inference fails. This applies to any tracked file in this repository,

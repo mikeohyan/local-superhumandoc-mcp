@@ -1,4 +1,5 @@
-# Secrets — never commit. RFC 0008 requires the API token to live only in .env.
+# Secrets — never commit. The `config-resolution` topic requires the API token
+# never to appear in a committed file; see _rfc/README.md.
 .env
 .env.*
 !.env.example

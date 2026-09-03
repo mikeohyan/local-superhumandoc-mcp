@@ -1,7 +1,7 @@
 # RFC index
 
 Design decisions for this repository, newest number last. The process is
-specified in RFC 0001; the operating manual is the `rfc`
+specified by the `rfc-process` topic below; the operating manual is the `rfc`
 skill in `.claude/skills/rfc/`.
 
 **An RFC's number does not determine its path.** Use the Path column below, or
@@ -10,11 +10,11 @@ skill in `.claude/skills/rfc/`.
 ## Current decisions by topic
 
 **Cite this table, not a number.** Any document whose job is to describe how the
-project works now — `CLAUDE.md`, `README.md`, `.env.example`, `.gitignore`,
-`.claude/skills/`, anything under `docs/reference/` — refers to a decision by its
-**topic**, so that superseding costs one row here instead of a repository-wide
-repair. RFC bodies are the exception: they are frozen records and cite numbers.
-The convention is specified by the `doc-conventions` topic.
+project works now — every file in this repository that is not an RFC body —
+refers to a decision by its **topic**, so that superseding costs one row here
+instead of a repository-wide repair. RFC bodies are the exception: they are
+frozen records and cite numbers. The convention is specified by the
+`doc-conventions` topic.
 
 A topic names a *subject*, so successive decisions about it share one topic and
 only the newest appears here. Status is carried because a topic's current

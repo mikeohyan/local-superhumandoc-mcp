@@ -16,7 +16,8 @@ cp .env.example .env    # then fill in your token and document ID
 ```
 
 `.env` is gitignored and must never be committed. The API token is a bearer
-token in UUID form; see RFC 0008 for the authentication scheme, the pinned API
+token in UUID form; see the `upstream-api` topic in
+[`_rfc/README.md`](_rfc/README.md) for the authentication scheme, the pinned API
 version, and why the published rate limits are treated as advisory.
 
 Further setup steps will be added here once the server exists.
@@ -33,11 +34,15 @@ what has shipped and remains current. `_rfc/archive/retired/` is history only.
 
 Worth reading first:
 
-- **RFC 0001** — the RFC process itself: numbering, the frozen-body rule, and
-  how a decision is superseded rather than rewritten.
-- **RFC 0008** — the pinned Superhuman Docs API version, base URL, auth scheme,
-  how to detect upstream drift, and why the published rate limits are advisory
-  rather than contractual. Supersedes RFC 0002.
+- **`rfc-process`** — the RFC process itself: numbering, the frozen-body rule,
+  and how a decision is superseded rather than rewritten.
+- **`upstream-api`** — the pinned Superhuman Docs API version, base URL, auth
+  scheme, how to detect upstream drift, and why the published rate limits are
+  advisory rather than contractual.
+- **`doc-conventions`** — why the two entries above are named by topic rather
+  than by RFC number, and how to cite code without line numbers.
+
+Those are topics, not filenames. The index resolves each to its current RFC.
 
 ## Working in this repository with Claude Code
 
