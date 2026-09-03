@@ -1,13 +1,13 @@
 ---
 rfc: 0009
 title: Reference decisions by topic and code by symbol, never by number or line
-status: Proposed
+status: Implemented
 created: 2026-09-03
-decided:
+decided: 2026-09-03
 supersedes:
 superseded_by:
 topic: doc-conventions
-commits: []
+commits: [adc2775f8ea293f0d60de697a85552627c7507a4, 55d7541f6085ca39411b70d9c095fca3533fb50d, eeb0ebe19bb315d336426d6812468e4532bff69d]
 tags: [process, documentation]
 ---
 
@@ -271,4 +271,43 @@ neither is worth building before the conventions have been lived with.
 
 ## Implementation notes
 
-Left empty at Proposed.
+Shipped in three commits on 2026-09-03: `adc2775` separated three pre-existing
+inaccuracies in the `rfc` skill, `55d7541` built the mechanism, and `eeb0ebe`
+repointed the twelve number-shaped citations across seven living files. This RFC
+moved from Proposed straight to Implemented, because the adoption ran before
+acceptance rather than after — which is what the Decision recommends, and the
+reason the eight `topic:` fields could be added while every RFC was still
+mutable.
+
+**Two things were learned by running the convention and folded into the Decision
+before it froze.**
+
+`_rfc/plans/NNNN-plan.md` needed the same carve-out as the index. A plan is named
+after the single RFC it implements, so it cannot avoid citing that number, and it
+is deleted when the RFC ships so the citation cannot outlive its referent. This
+surfaced immediately: the plan for *this* RFC violated the rule it was written to
+implement.
+
+The audit command needs `(\./)?` in its filter. GNU `grep -r .` prefixes every
+path with `./`, so an anchored `^_rfc/` matches nothing and the exclusion becomes
+a silent no-op — it reported zero hits under this session's `grep` shim and all 58
+under `/bin/grep`. The invariants in the `rfc` skill carry a comment saying so,
+because the failure is invisible: a broken filter looks exactly like a clean repo.
+
+**One decision changed during adoption.** The topic for the upstream API was
+`api-pin` when this RFC was drafted, and is `upstream-api` as shipped. "Pin" is
+the decision rather than the subject, so an RFC that later stopped pinning could
+not have reused the name without it lying — the precise failure this mechanism
+exists to prevent. It was also already under-inclusive, since RFC 0008 decides
+both the version pin and the advisory-rate-limit stance.
+
+**Adversarial review before the freeze corrected four factual claims in the
+Context and Decision**, each checked against `git show`: a count of six citations
+repaired inside other RFCs (none were), four references outside `_rfc/` (five,
+the omission being `.gitignore`), a total of ten that no counting reached, and a
+carve-out declaring `docs/validation/` frozen that would have reversed RFC 0003
+without superseding it. The enumerated living-document set was replaced by a
+criterion plus the audit command, since three inconsistent enumerations inside a
+document arguing against enumeration was the defect it was written to name.
+
+Nothing in the Decision was left unimplemented.

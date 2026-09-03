@@ -24,7 +24,7 @@ decision may not yet be accepted.
 |---|---|---|---|
 | `upstream-api` | 0008 | Proposed | `_rfc/0008-api-version-lock-and-advisory-rate-limits.md` |
 | `config-resolution` | 0006 | Proposed | `_rfc/0006-credential-and-config-resolution.md` |
-| `doc-conventions` | 0009 | Proposed | `_rfc/0009-documentation-reference-conventions.md` |
+| `doc-conventions` | 0009 | Implemented | `_rfc/archive/implemented/0009-documentation-reference-conventions.md` |
 | `evidence-location` | 0003 | Proposed | `_rfc/0003-evidence-and-reference-material.md` |
 | `packaging` | 0007 | Proposed | `_rfc/0007-packaging-and-distribution.md` |
 | `rfc-process` | 0001 | Implemented | `_rfc/archive/implemented/0001-rfc-process.md` |
@@ -43,7 +43,6 @@ Proposed and Accepted: decided or awaiting decision, not yet shipped.
 | 0006 | Resolve credentials and document scope from a project-local `.env` inside the server | `config-resolution` | Proposed | — | `_rfc/0006-credential-and-config-resolution.md` |
 | 0007 | Package with hatchling and distribute via `uvx` from pinned git tags | `packaging` | Proposed | — | `_rfc/0007-packaging-and-distribution.md` |
 | 0008 | Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory | `upstream-api` | Proposed | — | `_rfc/0008-api-version-lock-and-advisory-rate-limits.md` |
-| 0009 | Reference decisions by topic and code by symbol, never by number or line | `doc-conventions` | Proposed | — | `_rfc/0009-documentation-reference-conventions.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
@@ -53,6 +52,7 @@ works today.
 | # | Title | Topic | Status | Decided | Path |
 |---|---|---|---|---|---|
 | 0001 | Record design decisions as immutable RFCs in `_rfc/` | `rfc-process` | Implemented | 2026-09-03 | `_rfc/archive/implemented/0001-rfc-process.md` |
+| 0009 | Reference decisions by topic and code by symbol, never by number or line | `doc-conventions` | Implemented | 2026-09-03 | `_rfc/archive/implemented/0009-documentation-reference-conventions.md` |
 
 ## Retired — `_rfc/archive/retired/`
 
