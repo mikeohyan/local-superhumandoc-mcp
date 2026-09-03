@@ -135,19 +135,30 @@ command is committed.
 **Errors.** Anticipated failures — an API 4xx, a missing page, a token without
 the needed scope — are raised as `ToolError`, whose message reaches the model.
 Any other exception is redacted by the SDK to `Error executing tool X` with a
-server-side traceback. So API errors are wrapped and genuine bugs are allowed to
-crash, which gives the model actionable text in the first case and reveals
-nothing in the second.
+server-side traceback. So API errors are wrapped and genuine bugs are left
+unwrapped, which gives the model actionable text in the first case and reveals
+nothing in the second. `ToolError` is importable only as `from
+mcp.server.mcpserver.exceptions import ToolError` — it is not re-exported from
+`mcp.server.mcpserver`, from `mcp.server`, or from the top-level `mcp`, and each
+of the shorter spellings raises `ImportError`.
 
 **Testing.** The tool layer is tested in-process with `mcp.Client(server)`, which
 connects directly to an `MCPServer` instance with no subprocess; v1's
 `create_connected_server_and_client_session` was removed in v2 and is not an
-option. `Client(server, raise_exceptions=True)` re-raises server-side exceptions
-instead of converting them to error results, which is what makes a failing test
-readable. The REST layer is tested against a mocked `httpx2` transport, and that
-is where the interesting behaviour lives — mutation polling, backoff, error
-translation, value post-processing, metadata caching — none of which needs an MCP
-client in the loop.
+option. Tool failures are asserted on the returned `CallToolResult` — its
+`is_error` and `content` — never on an exception propagating out of
+`call_tool()`. `Client` does accept `raise_exceptions=True`, but the flag does
+not re-raise exceptions raised by tool bodies: `Tool.run` converts every one of
+them into a `CallToolResult` before the request reaches the dispatcher where the
+flag is consulted, so it is indistinguishable from the default client for the
+scenario a test suite actually exercises. A test that needs an exception to
+surface in Python must call `MCPServer.call_tool()` directly rather than going
+through `Client`. Verified against `mcp` 2.1.1; the evidence, including the
+SDK's own unresolved maintainer TODO on when that flag fires, is at
+`docs/reference/mcp-sdk-v2-api-surface.md`. The REST layer is tested against a
+mocked `httpx2` transport, and that is where the interesting behaviour lives —
+mutation polling, backoff, error translation, value post-processing, metadata
+caching — none of which needs an MCP client in the loop.
 
 **Tool registration** happens inside a server factory, so registration can be
 guarded by configuration read at build time, before `run()`. The destructive-tool
