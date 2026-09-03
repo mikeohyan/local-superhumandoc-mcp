@@ -19,6 +19,7 @@ Proposed and Accepted: decided or awaiting decision, not yet shipped.
 | 0006 | Resolve credentials and document scope from a project-local `.env` inside the server | Proposed | — | `_rfc/0006-credential-and-config-resolution.md` |
 | 0007 | Package with hatchling and distribute via `uvx` from pinned git tags | Proposed | — | `_rfc/0007-packaging-and-distribution.md` |
 | 0008 | Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory | Proposed | — | `_rfc/0008-api-version-lock-and-advisory-rate-limits.md` |
+| 0009 | Reference decisions by topic and code by symbol, never by number or line | Proposed | — | `_rfc/0009-documentation-reference-conventions.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
