@@ -1,12 +1,12 @@
 ---
 rfc: 0001
 title: Record design decisions as immutable RFCs in _rfc/
-status: Accepted
+status: Implemented
 created: 2026-09-03
 decided: 2026-09-03
 supersedes:
 superseded_by:
-commits: []
+commits: [94eb3ca11b3870f952e783553d023739ae11e44c]
 tags: [process, documentation, claude-code]
 ---
 
@@ -55,7 +55,7 @@ _rfc/
 
 A given RFC number therefore lives in one of three directories depending on its
 status. Nothing may hardcode an RFC's path; the lookup is
-`ls _rfc/**/NNNN-*.md`, or `_rfc/README.md`, which records each RFC's location.
+`ls _rfc/NNNN-*.md _rfc/archive/*/NNNN-*.md 2>/dev/null`, or `_rfc/README.md`, which records each RFC's location.
 
 The second archive is named `retired/` rather than `superseded/` so that
 Rejected RFCs — decisions that were never true, as opposed to decisions that
@@ -80,7 +80,7 @@ records what happened, and so cannot be written before it happens.
 Four digits, zero-padded, allocated in order across all three directories:
 
 ```bash
-ls _rfc/*.md _rfc/archive/*/*.md 2>/dev/null \
+ls _rfc/[0-9]*.md _rfc/archive/*/[0-9]*.md 2>/dev/null \
   | grep -oE '[0-9]{4}' | sort -n | tail -1
 ```
 
@@ -91,9 +91,9 @@ ls _rfc/*.md _rfc/archive/*/*.md 2>/dev/null \
 | → Proposed | `brainstorming` reaches "write design doc" | write `_rfc/NNNN-slug.md`, commit |
 | → Accepted | owner approves at the spec-review gate | set `status`, `decided`; update index |
 | plan created | `writing-plans` runs | write `_rfc/plans/NNNN-plan.md` |
-| → Implemented | `verification-before-completion` passes | record `commits`, fill Implementation notes, `git mv` to `archive/implemented/`, `git rm` the plan |
-| → Rejected | owner declines at the spec-review gate | `git mv` to `archive/retired/` |
-| → Superseded | a later RFC declares `supersedes: N` | set `superseded_by`, `git mv` to `archive/retired/` |
+| → Implemented | `verification-before-completion` passes | record `commits`, fill Implementation notes, `git mv` to `archive/implemented/`, `git rm` the plan; update index |
+| → Rejected | owner declines at the spec-review gate | set `status`, `git mv` to `archive/retired/`; update index |
+| → Superseded | a later RFC declares `supersedes: N` | set `superseded_by`, `git mv` to `archive/retired/`; update index |
 
 Every file relocation uses `git mv`, never a plain `mv`. A plain move registers
 as an untracked addition plus a deletion, and git's rename inference degrades

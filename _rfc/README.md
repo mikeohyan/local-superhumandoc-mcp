@@ -13,7 +13,6 @@ Decided, not yet shipped.
 
 | # | Title | Status | Decided | Path |
 |---|---|---|---|---|
-| 0001 | Record design decisions as immutable RFCs in `_rfc/` | Accepted | 2026-09-03 | `_rfc/0001-rfc-process.md` |
 | 0002 | Pin development to Superhuman Docs API v1.6.0 and track spec drift | Accepted | 2026-09-03 | `_rfc/0002-superhuman-docs-api-version-lock.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
@@ -23,7 +22,7 @@ works today.
 
 | # | Title | Status | Decided | Path |
 |---|---|---|---|---|
-| _none yet_ | | | | |
+| 0001 | Record design decisions as immutable RFCs in `_rfc/` | Implemented | 2026-09-03 | `_rfc/archive/implemented/0001-rfc-process.md` |
 
 ## Retired — `_rfc/archive/retired/`
 

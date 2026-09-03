@@ -17,7 +17,7 @@ Read `_rfc/README.md`. It is the index — every RFC's number, title, status, an
 a path from a number. To locate one directly:
 
 ```bash
-ls _rfc/**/NNNN-*.md
+ls _rfc/NNNN-*.md _rfc/archive/*/NNNN-*.md 2>/dev/null
 ```
 
 Currently-true decisions are split across two places, and both matter:
@@ -55,7 +55,7 @@ dependency manager, setting a repository convention.
 ## Allocating a number
 
 ```bash
-ls _rfc/*.md _rfc/archive/*/*.md 2>/dev/null \
+ls _rfc/[0-9]*.md _rfc/archive/*/[0-9]*.md 2>/dev/null \
   | grep -oE '[0-9]{4}' | sort -n | tail -1
 ```
 
@@ -122,8 +122,11 @@ that the option was considered. Update the index.
 Write the new RFC first, with `supersedes: NNNN` in its frontmatter. Then, on
 the old one:
 
+Locate the old RFC with the lookup above, then move it by its actual path:
+
 ```bash
-git mv _rfc/**/NNNN-old-slug.md _rfc/archive/retired/
+git mv _rfc/0003-old-slug.md _rfc/archive/retired/          # if in flight
+git mv _rfc/archive/implemented/0003-old-slug.md _rfc/archive/retired/   # if shipped
 ```
 
 Set `status: Superseded` and `superseded_by: MMMM`. Do not edit its body, and do
@@ -147,8 +150,12 @@ row from memory:
 
 ```bash
 grep -H -E '^(rfc|title|status|decided|superseded_by):' \
-  _rfc/*.md _rfc/archive/*/*.md 2>/dev/null
+  _rfc/[0-9]*.md _rfc/archive/*/[0-9]*.md 2>/dev/null
 ```
+
+The `[0-9]*` glob is deliberate: a plain `*.md` also matches `TEMPLATE.md`,
+whose placeholder frontmatter (`rfc: NNNN`, `status: Proposed`) would otherwise
+be copied into the index as a phantom row.
 
 If the index has visibly drifted from the files more than once, that is the
 signal to write a generator script — a bounded change, not a new RFC.
