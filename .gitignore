@@ -1,0 +1,23 @@
+# Secrets — never commit. RFC 0002 requires the API token to live only in .env.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Tooling caches
+.uv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# OS
+.DS_Store
+
+# Note: uv.lock is intentionally NOT ignored — it is committed so builds
+# are reproducible.
