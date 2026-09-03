@@ -6,6 +6,7 @@ created: 2026-09-03
 decided: 2026-09-03
 supersedes:
 superseded_by:
+topic: rfc-process
 commits: [94eb3ca11b3870f952e783553d023739ae11e44c]
 tags: [process, documentation, claude-code]
 ---

@@ -6,6 +6,7 @@ created: 2026-09-03
 decided:
 supersedes: 0002
 superseded_by:
+topic: upstream-api
 commits: []
 tags: [api, dependencies, superhuman-docs, rate-limiting]
 ---

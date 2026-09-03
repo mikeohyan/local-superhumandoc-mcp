@@ -6,11 +6,22 @@ created: YYYY-MM-DD
 decided:
 supersedes:
 superseded_by:
+topic: kebab-case-subject
 commits: []
 tags: []
 ---
 
 # RFC NNNN — Short imperative phrase naming the decision
+
+<!--
+`topic:` names the SUBJECT this decision is about, not the decision itself.
+Successive RFCs on the same subject share a topic, and a topic has at most one
+current RFC — that is what lets living documents cite the topic instead of a
+number. Reuse an existing topic from the table in `_rfc/README.md` whenever this
+RFC revises a decision already made there; invent a new one only for a genuinely
+new subject. Good: `upstream-api`, `packaging`. Bad: `pin-api-to-v1-6-0` (that is the
+decision), `misc` (that is not a subject).
+-->
 
 ## Context
 

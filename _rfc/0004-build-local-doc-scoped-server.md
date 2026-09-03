@@ -6,6 +6,7 @@ created: 2026-09-03
 decided:
 supersedes:
 superseded_by:
+topic: server-ownership
 commits: []
 tags: [architecture, mcp, superhuman-docs]
 ---

@@ -6,6 +6,7 @@ created: 2026-09-03
 decided:
 supersedes:
 superseded_by:
+topic: config-resolution
 commits: []
 tags: [architecture, configuration, security]
 ---

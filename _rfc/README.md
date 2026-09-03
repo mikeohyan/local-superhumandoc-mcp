@@ -1,39 +1,64 @@
 # RFC index
 
 Design decisions for this repository, newest number last. The process is
-specified in RFC 0001; the operating manual is the `rfc` skill in
-`.claude/skills/rfc/`.
+specified in RFC 0001; the operating manual is the `rfc`
+skill in `.claude/skills/rfc/`.
 
 **An RFC's number does not determine its path.** Use the Path column below, or
 `ls _rfc/**/NNNN-*.md`.
+
+## Current decisions by topic
+
+**Cite this table, not a number.** Any document whose job is to describe how the
+project works now — `CLAUDE.md`, `README.md`, `.env.example`, `.gitignore`,
+`.claude/skills/`, anything under `docs/reference/` — refers to a decision by its
+**topic**, so that superseding costs one row here instead of a repository-wide
+repair. RFC bodies are the exception: they are frozen records and cite numbers.
+The convention is specified by the `doc-conventions` topic.
+
+A topic names a *subject*, so successive decisions about it share one topic and
+only the newest appears here. Status is carried because a topic's current
+decision may not yet be accepted.
+
+| Topic | Current RFC | Status | Path |
+|---|---|---|---|
+| `upstream-api` | 0008 | Proposed | `_rfc/0008-api-version-lock-and-advisory-rate-limits.md` |
+| `config-resolution` | 0006 | Proposed | `_rfc/0006-credential-and-config-resolution.md` |
+| `doc-conventions` | 0009 | Proposed | `_rfc/0009-documentation-reference-conventions.md` |
+| `evidence-location` | 0003 | Proposed | `_rfc/0003-evidence-and-reference-material.md` |
+| `packaging` | 0007 | Proposed | `_rfc/0007-packaging-and-distribution.md` |
+| `rfc-process` | 0001 | Implemented | `_rfc/archive/implemented/0001-rfc-process.md` |
+| `server-ownership` | 0004 | Proposed | `_rfc/0004-build-local-doc-scoped-server.md` |
+| `tool-surface` | 0005 | Proposed | `_rfc/0005-tool-surface-and-write-safety.md` |
 
 ## In flight — `_rfc/`
 
 Proposed and Accepted: decided or awaiting decision, not yet shipped.
 
-| # | Title | Status | Decided | Path |
-|---|---|---|---|---|
-| 0003 | Keep empirical evidence and reference material in `docs/`, separate from decisions in `_rfc/` | Proposed | — | `_rfc/0003-evidence-and-reference-material.md` |
-| 0004 | Build a local doc-scoped MCP server rather than adopting the official or community servers | Proposed | — | `_rfc/0004-build-local-doc-scoped-server.md` |
-| 0005 | Expose element-scoped editing tools and gate destructive operations behind a flag | Proposed | — | `_rfc/0005-tool-surface-and-write-safety.md` |
-| 0006 | Resolve credentials and document scope from a project-local `.env` inside the server | Proposed | — | `_rfc/0006-credential-and-config-resolution.md` |
-| 0007 | Package with hatchling and distribute via `uvx` from pinned git tags | Proposed | — | `_rfc/0007-packaging-and-distribution.md` |
-| 0008 | Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory | Proposed | — | `_rfc/0008-api-version-lock-and-advisory-rate-limits.md` |
-| 0009 | Reference decisions by topic and code by symbol, never by number or line | Proposed | — | `_rfc/0009-documentation-reference-conventions.md` |
+| # | Title | Topic | Status | Decided | Path |
+|---|---|---|---|---|---|
+| 0003 | Keep empirical evidence and reference material in `docs/`, separate from decisions in `_rfc/` | `evidence-location` | Proposed | — | `_rfc/0003-evidence-and-reference-material.md` |
+| 0004 | Build a local doc-scoped MCP server rather than adopting the official or community servers | `server-ownership` | Proposed | — | `_rfc/0004-build-local-doc-scoped-server.md` |
+| 0005 | Expose element-scoped editing tools and gate destructive operations behind a flag | `tool-surface` | Proposed | — | `_rfc/0005-tool-surface-and-write-safety.md` |
+| 0006 | Resolve credentials and document scope from a project-local `.env` inside the server | `config-resolution` | Proposed | — | `_rfc/0006-credential-and-config-resolution.md` |
+| 0007 | Package with hatchling and distribute via `uvx` from pinned git tags | `packaging` | Proposed | — | `_rfc/0007-packaging-and-distribution.md` |
+| 0008 | Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory | `upstream-api` | Proposed | — | `_rfc/0008-api-version-lock-and-advisory-rate-limits.md` |
+| 0009 | Reference decisions by topic and code by symbol, never by number or line | `doc-conventions` | Proposed | — | `_rfc/0009-documentation-reference-conventions.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
 Shipped, **and still the current truth**. Read these to learn how the system
 works today.
 
-| # | Title | Status | Decided | Path |
-|---|---|---|---|---|
-| 0001 | Record design decisions as immutable RFCs in `_rfc/` | Implemented | 2026-09-03 | `_rfc/archive/implemented/0001-rfc-process.md` |
+| # | Title | Topic | Status | Decided | Path |
+|---|---|---|---|---|---|
+| 0001 | Record design decisions as immutable RFCs in `_rfc/` | `rfc-process` | Implemented | 2026-09-03 | `_rfc/archive/implemented/0001-rfc-process.md` |
 
 ## Retired — `_rfc/archive/retired/`
 
-Superseded or Rejected. No longer true — history only.
+Superseded or Rejected. No longer true — history only. A retired RFC keeps its
+topic so the lineage stays joined; it is never the topic's current decision.
 
-| # | Title | Status | Superseded by | Path |
-|---|---|---|---|---|
-| 0002 | Pin development to Superhuman Docs API v1.6.0 and track spec drift | Superseded | 0008 | `_rfc/archive/retired/0002-superhuman-docs-api-version-lock.md` |
+| # | Title | Topic | Status | Superseded by | Path |
+|---|---|---|---|---|---|
+| 0002 | Pin development to Superhuman Docs API v1.6.0 and track spec drift | `upstream-api` | Superseded | 0008 | `_rfc/archive/retired/0002-superhuman-docs-api-version-lock.md` |

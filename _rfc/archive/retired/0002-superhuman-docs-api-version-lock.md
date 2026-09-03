@@ -6,6 +6,7 @@ created: 2026-09-03
 decided: 2026-09-03
 supersedes:
 superseded_by: 0008
+topic: upstream-api
 commits: []
 tags: [api, dependencies, superhuman-docs]
 ---

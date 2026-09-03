@@ -6,6 +6,7 @@ created: 2026-09-03
 decided:
 supersedes:
 superseded_by:
+topic: tool-surface
 commits: []
 tags: [architecture, mcp, tools, safety]
 ---
