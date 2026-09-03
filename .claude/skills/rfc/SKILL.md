@@ -20,9 +20,11 @@ a path from a number. To locate one directly:
 ls _rfc/NNNN-*.md _rfc/archive/*/NNNN-*.md 2>/dev/null
 ```
 
-Currently-true decisions are split across two places, and both matter:
+Currently-true decisions are split across two places, and both matter — the
+third directory below is history only:
 
-- `_rfc/*.md` — Proposed and Accepted. Decided, not yet shipped.
+- `_rfc/*.md` — Proposed and Accepted: decided or awaiting decision, not yet
+  shipped.
 - `_rfc/archive/implemented/*.md` — shipped, **and still the current truth**.
   A session learning how the system works today reads these.
 - `_rfc/archive/retired/*.md` — Superseded and Rejected. No longer true. Read
@@ -125,8 +127,8 @@ the old one:
 Locate the old RFC with the lookup above, then move it by its actual path:
 
 ```bash
-git mv _rfc/0003-old-slug.md _rfc/archive/retired/          # if in flight
-git mv _rfc/archive/implemented/0003-old-slug.md _rfc/archive/retired/   # if shipped
+git mv _rfc/NNNN-old-slug.md _rfc/archive/retired/                     # if in flight
+git mv _rfc/archive/implemented/NNNN-old-slug.md _rfc/archive/retired/  # if shipped
 ```
 
 Set `status: Superseded` and `superseded_by: MMMM`. Do not edit its body, and do
