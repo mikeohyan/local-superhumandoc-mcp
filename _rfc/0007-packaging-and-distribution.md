@@ -1,9 +1,9 @@
 ---
 rfc: 0007
 title: Package with hatchling and distribute via uvx from pinned git tags
-status: Proposed
+status: Accepted
 created: 2026-09-03
-decided:
+decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: packaging
