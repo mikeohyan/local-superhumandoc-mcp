@@ -185,12 +185,24 @@ confusing failures:
 
 The idiomatic Python approach and a single line of code. Rejected because it
 inherits the client's working directory, which is exactly the value that is not
-under our control. It resolves correctly for a project-scoped server and then
-silently resolves to `~/.claude/.env` — or to nothing — for a user-scoped one,
-with no error and no signal that anything changed. A configuration mechanism
-whose correctness depends on an invisible registration choice made in a
-different tool is a mechanism that will be debugged at the worst possible
-moment.
+under our control. Bare `load_dotenv()` reads `./.env` against the launch
+directory, making it candidate 4 with no fallbacks: it fails whenever `claude`
+is started from a subdirectory, silently and with no signal that anything
+changed. `find_dotenv()` survives that case by walking up, and buys a worse one
+— the walk does not stop at the project root, so it can reach an unrelated
+`.env` in a parent directory or in the user's home and load a token scoped to
+the wrong document.
+
+This RFC first rejected the approach on a different ground: that it would
+resolve to `~/.claude/.env` for a user-scoped registration, making correctness
+depend on an invisible registration choice made in another tool. **Direct
+observation refuted that.** The working directory is the launch directory
+uniformly across project, local and user scopes, and the `~/.claude` value the
+client's documentation shows describes a different helper process, not the
+spawned stdio server. The rejection stands, but on launch-directory grounds
+rather than scope-dependence — the failure is triggered by where a user happens
+to be standing, not by how the server was registered. Recorded at
+`docs/reference/mcp-client-environment.md`.
 
 ### Environment variables written inline into `.mcp.json`'s `env` block
 
@@ -219,7 +231,9 @@ Fully explicit, trivially debuggable, no inference anywhere. Rejected because it
 pushes a mandatory path into every `.mcp.json` in every project, which is both
 noise and a second place for the project's layout to be wrong. It also breaks
 the plain `uvx` invocation for anyone trying the server from a shell. Keeping it
-as candidate 1 preserves the escape hatch without making everyone pay for it.
+as candidate 1 preserves the explicit path for the projects that need it —
+which, per the Decision above, is more of them than "escape hatch" suggests —
+without making every project carry it.
 
 ## Consequences
 
