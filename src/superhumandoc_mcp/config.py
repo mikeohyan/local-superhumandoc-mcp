@@ -116,3 +116,24 @@ def load_config(
         env_file=env_file,
         sources=sources,
     )
+
+
+def format_startup_line(config: Config) -> str:
+    """One line to stderr at startup.
+
+    Every failure mode in resolution is otherwise silent — the wrong file loads,
+    or none does, and the first symptom is an authentication error several tool
+    calls later. This line turns that mystery into an observation. It must never
+    carry the token.
+
+    Seam: the `config-resolution` topic also specifies a token name and a
+    `scoped` flag on this line. Both come from a `whoami` call, which needs an
+    HTTP client this wave does not build — that lands with the `upstream-api`
+    topic. Deliberately not implemented here.
+    """
+    sources = " ".join(f"{key}={origin}" for key, origin in sorted(config.sources.items()))
+    state = "ON" if config.allow_destructive else "off"
+    return (
+        f"superhumandoc-mcp: env={config.env_file} doc={config.doc_id} "
+        f"destructive tools: {state} [{sources}]"
+    )
