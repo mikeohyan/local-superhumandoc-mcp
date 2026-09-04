@@ -139,15 +139,100 @@ constructor, as the `packaging` topic states.
 
 ## B1 — `src/` layout without the `packages` line
 
-_(not yet run)_
+**Result: contradicts the claim.** The claim is that omitting
+`[tool.hatch.build.targets.wheel] packages` yields "a silently empty wheel."
+That is not what happened. With the `packages` line omitted entirely from an
+otherwise-documented `pyproject.toml` (`src/superhumandoc_mcp/{__init__.py,
+__main__.py}`), `uv build --wheel` (which resolved hatchling 1.32.0 as the
+build backend) succeeded and produced a wheel containing the actual package
+files — not an empty one, and not a build error. Verbatim:
+
+```
+$ uv build --wheel
+Building wheel...
+Successfully built dist/superhumandoc_mcp-0.1.0-py3-none-any.whl
+```
+
+```
+$ unzip -l dist/superhumandoc_mcp-0.1.0-py3-none-any.whl
+Archive:  dist/superhumandoc_mcp-0.1.0-py3-none-any.whl
+  Length      Date    Time    Name
+---------  ---------- -----   ----
+        0  2020-02-02 00:00   superhumandoc_mcp/__init__.py
+      135  2020-02-02 00:00   superhumandoc_mcp/__main__.py
+      236  2020-02-02 00:00   superhumandoc_mcp-0.1.0.dist-info/METADATA
+       87  2020-02-02 00:00   superhumandoc_mcp-0.1.0.dist-info/WHEEL
+       70  2020-02-02 00:00   superhumandoc_mcp-0.1.0.dist-info/entry_points.txt
+      508  2020-02-02 00:00   superhumandoc_mcp-0.1.0.dist-info/RECORD
+---------                     -------
+     1036                     6 files
+```
+
+Reproduced on a clean rebuild (`rm -rf dist build`, rebuild) with byte-identical
+wheel contents, so this is not a one-off. Evidently hatchling 1.32.0
+auto-discovers the `src/<normalized-project-name>` directory
+(`superhumandoc-mcp` → `superhumandoc_mcp`) when no explicit `packages` list is
+given, and packages it correctly. Neither of the two failure modes the claim
+considers (silent empty wheel, or a hard error) occurred; the actual outcome is
+a third one — a correct build with the line absent.
 
 ## B2 — documented `pyproject.toml` builds a correct wheel
 
-_(not yet run)_
+Restored `[tool.hatch.build.targets.wheel] packages = ["src/superhumandoc_mcp"]`
+and rebuilt from a clean `dist/` (`rm -rf dist build`, rebuild). The wheel's
+contents were identical to B1's — `superhumandoc_mcp/__init__.py` and
+`superhumandoc_mcp/__main__.py` both present — and its metadata carries the
+claimed `Requires-Dist` entries, verbatim from `unzip -p
+dist/superhumandoc_mcp-0.1.0-py3-none-any.whl
+superhumandoc_mcp-0.1.0.dist-info/METADATA`:
+
+```
+Metadata-Version: 2.5
+Name: superhumandoc-mcp
+Version: 0.1.0
+Summary: MCP server for a single Superhuman Docs document.
+Requires-Python: >=3.11
+Requires-Dist: httpx2>=2.5.0
+Requires-Dist: mcp<3,>=2.1.1
+Requires-Dist: python-dotenv>=1.0
+```
+
+Confirmed: the documented `pyproject.toml`, with the `packages` line present,
+builds a correct wheel carrying `Requires-Dist` entries for `mcp` and
+`httpx2`. Given B1, this establishes only that the documented form works — not
+that it is the only form that works.
 
 ## B3 — distribution/script name mismatch, exact error text
 
-_(not yet run)_
+Built a second scratch copy with `[project.scripts]` changed to
+`sdmcp-run = "superhumandoc_mcp.__main__:main"` (distribution name left as
+`superhumandoc-mcp`), then ran `uvx` against the distribution name (the now-
+mismatched script name):
+
+```
+$ uvx --from /tmp/.../pkg-spike/mismatch superhumandoc-mcp
+```
+
+Exact output, character for character:
+
+```
+   Building superhumandoc-mcp @ file:///tmp/claude-1002/-home-mike-code-mike-local-superhumandoc-mcp/df6e3a93-5218-4bc7-b426-59cde866fc6e/scratchpad/pkg-spike/mismatch
+      Built superhumandoc-mcp @ file:///tmp/claude-1002/-home-mike-code-mike-local-superhumandoc-mcp/df6e3a93-5218-4bc7-b426-59cde866fc6e/scratchpad/pkg-spike/mismatch
+Installed 30 packages in 5ms
+An executable named `superhumandoc-mcp` is not provided by package `superhumandoc-mcp`.
+The following executables are available:
+- sdmcp-run
+
+Use `uvx --from superhumandoc-mcp sdmcp-run` instead.
+```
+
+Confirmed, word for word against the claim's shape: "An executable named `X`
+is not provided by package `Y`" — here X and Y are both `superhumandoc-mcp`
+since the *distribution* name is what was passed to `uvx` and also names the
+package; the mismatch is between that name and the actual script name
+(`sdmcp-run`). uv additionally lists the available executables and suggests
+the corrected invocation, which the claim does not mention but does not
+contradict either.
 
 ## B4 — `uvx` from a pinned git tag
 
@@ -159,11 +244,45 @@ _(not yet run)_
 
 ## B6 — dependency resolution, and absence of classic `httpx`
 
-_(not yet run)_
+`uv lock` against the documented dependency set (`mcp>=2.1.1,<3`,
+`httpx2>=2.5.0`, `python-dotenv>=1.0`) resolved successfully: "Resolved 32
+packages in 16ms". Exact resolved versions, read from the generated
+`uv.lock`:
+
+- `mcp` 2.1.1
+- `httpx2` 2.12.0
+- `python-dotenv` 1.2.3
+
+`grep '^name = "httpx' uv.lock` returns exactly two matches — `httpx2` and
+`httpx2-jsfetch` — and zero matches for a package named exactly `httpx`.
+Classic `httpx` is confirmed absent from the resolved dependency set, matching
+the claim.
 
 ## B7 — `requires-python` lower bound
 
-_(not yet run)_
+The environment's default interpreter resolution (`uv venv` / `uv lock`, no
+explicit `--python`) picked **CPython 3.13.13**, a uv-managed interpreter at
+`~/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu/bin/python3.13` — not
+the system Python, which is 3.11.2 at `/usr/bin/python3.11`. Both satisfy
+`>=3.11`; uv's default selection preferred the newest compatible interpreter
+it knew about over the system one.
+
+A 3.10 interpreter was not installed locally, but `uv python list` showed one
+available for uv to fetch (`cpython-3.10.20-linux-x86_64-gnu ... <download
+available>`), so the lower bound was exercised rather than left untested.
+Forcing it:
+
+```
+$ uv run --python 3.10 python -c "print('hello')"
+Downloading cpython-3.10.20-linux-x86_64-gnu (download) (28.4MiB)
+ Downloaded cpython-3.10.20-linux-x86_64-gnu (download)
+Using CPython 3.10.20
+error: The requested interpreter resolved to Python 3.10.20, which is incompatible with the project's Python requirement: `>=3.11` (from `project.requires-python`)
+```
+
+Confirmed: `requires-python = ">=3.11"` is enforced by uv — a 3.10 interpreter
+is downloaded (since it was requested explicitly) but then refused with a
+clear, specific error rather than silently accepted.
 
 ## B8 — stdio end-to-end through the console script
 
@@ -175,3 +294,11 @@ _(list each claim that the probes refuted or refined, with the probe that did
 it. The RFC is still Proposed, so its body may be amended rather than
 superseded — but that is a decision for an RFC-owning session, not for this
 file.)_
+
+- **B1 refutes the packaging topic's claim that omitting
+  `[tool.hatch.build.targets.wheel] packages` under a `src/` layout "builds an
+  empty wheel."** Observed instead: with hatchling 1.32.0 (the version `uv
+  build` resolved), omitting that line built a complete, correct wheel — the
+  build backend auto-discovered `src/superhumandoc_mcp` from the normalized
+  project name and packaged it without error or omission. Neither predicted
+  failure mode (silent empty wheel, or a hard build error) occurred.
