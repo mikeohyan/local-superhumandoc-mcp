@@ -5,7 +5,8 @@ from superhumandoc_mcp.client import DocsClient
 from superhumandoc_mcp.config import Config
 from superhumandoc_mcp.deadline import Deadline
 from superhumandoc_mcp.errors import (
-    AuthFailure, NotTransmitted, OutcomeUnknown, RateLimited, Replay,
+    AuthFailure,
+    ClientError, NotTransmitted, OutcomeUnknown, RateLimited, Replay,
     StickyRateLimit, UpstreamRefused,
 )
 from superhumandoc_mcp.throttle import Bucket
@@ -453,3 +454,44 @@ async def test_a_retry_after_header_is_honoured_but_clamped() -> None:
     )
     assert response.status_code == 200
     assert slept == [60.0]
+
+
+async def test_a_replay_delay_the_deadline_cannot_afford_is_refused() -> None:
+    """The third sleep site. Throttle waits and 429 backoff both refuse a sleep
+    they cannot afford; the replay delay must too, or a call that has already
+    run out of time spends what is left waiting to try again anyway."""
+
+    class FakeClock:
+        def __init__(self) -> None:
+            self.now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+    clock = FakeClock()
+    deadline = Deadline(clock=clock)
+    calls: list[int] = []
+    slept: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        calls.append(1)
+        # Leave less than the 0.5-1.0 s replay delay needs.
+        clock.now = 79.8
+        raise httpx2.ReadTimeout("lost", request=request)
+
+    client = DocsClient(
+        _config(),
+        transport=httpx2.MockTransport(handler),
+        sleep=record_sleep,
+        rand=lambda: 1.0,
+    )
+    with pytest.raises(ClientError):
+        await client.request(
+            "GET", "/docs", bucket=Bucket.READ, replay=Replay.SAFE,
+            deadline=deadline, operation="find_rows",
+        )
+    assert calls == [1], "the replay must not be attempted"
+    assert slept == [], "no truncated sleep may happen either"
