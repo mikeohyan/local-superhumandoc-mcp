@@ -194,3 +194,211 @@ only in the file, was loaded as `from_file_doc_id`.
 | Working directory by scope | Same value as `CLAUDE_PROJECT_DIR` for the server process itself, uniformly across project/local/user scope, as tested here — the scope-dependent table in Claude Code's docs governs a separate `headersHelper` process, not the server's own `command` | [OBSERVED] for the server process; [DOCUMENTED] for the `headersHelper` distinction |
 | Other useful variables | `CLAUDECODE=1`, a fresh `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` (only if the launching environment set it), an inherited, unsanitised `PATH`/`HOME`/shell environment | [OBSERVED] |
 | `load_dotenv(path, override=False)` precedence | Real env vars win; file-only keys still load | [OBSERVED] |
+
+---
+
+# Addendum — can a consumer project pin `CLAUDE_PROJECT_DIR` reliably?
+
+**Tested against:** Claude Code CLI `2.1.259` (same binary as above).
+**Date:** 2026-09-04.
+
+§2 above established that `CLAUDE_PROJECT_DIR` is the directory Claude Code was
+launched from, not a git root and not necessarily the directory holding the
+declaring `.mcp.json`. That creates an operational hazard: a user who launches
+`claude` from a subdirectory of their project gets the wrong `.env` path, or
+none, with the first symptom being a confusing auth error several tool calls
+later. This addendum tests every mechanism that could plausibly pin the value
+independently of the launch directory, using the same probe-server method as
+above (a minimal stdio server that dumps its own `os.environ`/`os.getcwd()`).
+Same confidence markers as the rest of this file.
+
+## A1. Is there a way to pin the project root independently of the launch directory?
+
+**No usable mechanism was found, checked four ways.**
+
+- **`--add-dir`:** does not affect `CLAUDE_PROJECT_DIR`. [OBSERVED] Launched
+  from `/tmp` with `--add-dir <worktree-path>`, the spawned server still
+  received `CLAUDE_PROJECT_DIR=/tmp` and `cwd=/tmp` — identical to a run with
+  no `--add-dir` at all. `--add-dir` only grants file-tool access to the extra
+  directory; it does not relabel the project root.
+- **Presetting `CLAUDE_PROJECT_DIR` in the shell before launching `claude`:**
+  overwritten, not respected. [OBSERVED] With
+  `CLAUDE_PROJECT_DIR=/tmp/PRESET_VALUE_SHOULD_NOT_APPEAR claude -p ...` run
+  from the worktree root, the spawned server received
+  `CLAUDE_PROJECT_DIR=<worktree root>` — Claude Code recomputed the value from
+  the launch directory and discarded the preset one entirely. This closes off
+  the most obvious workaround cleanly: a project cannot tell its users "just
+  export `CLAUDE_PROJECT_DIR` yourself."
+- **`settings.json` (any scope) and the settings precedence/schema
+  documentation:** no key was found. [DOCUMENTED — absence] Fetched
+  `code.claude.com/docs/en/settings` and searched the full text for
+  `projectDir`, `project_dir`, `rootDir`, and `workingDir` — zero matches. The
+  only project-root-adjacent variable documented anywhere is
+  `CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR`, which controls whether the Bash
+  tool snaps back to the project directory after a command — it doesn't
+  influence what that directory *is*.
+- **A `claude config` command:** does not exist in this CLI version.
+  [OBSERVED] `claude --help`'s `Commands:` list is `agents, attach, auth,
+  auto-mode, doctor, gateway, import, install, logs, mcp, plugin, project,
+  respawn, rm, setup-token, stop, ultrareview, update` — no `config`. The
+  `claude project` command exists but its only subcommand is `purge` (delete
+  local state for a project); nothing sets or pins a root.
+
+**Verdict: there is no supported way to make `CLAUDE_PROJECT_DIR` independent
+of the directory `claude` was launched from.** The value is fixed for the
+session at launch and nothing this project's setup instructions can tell a
+user to configure will change that.
+
+## A2. Does `.mcp.json` discovery walk up from the launch directory, and does `CLAUDE_PROJECT_DIR` walk up with it?
+
+**Discovery walks up. `CLAUDE_PROJECT_DIR` does not. This is the crux
+disagreement, and it is real.** [OBSERVED]
+
+A project `.mcp.json` was placed at the worktree root. `claude mcp list`, run
+from `_rfc/archive/implemented/` — two directories below the root — showed the
+server as registered (pending approval), confirming discovery walks up rather
+than looking only in the exact launch directory. A headless spawn
+(`claude -p ... --allowedTools "mcp__env-probe2__noop"`, no `--mcp-config`,
+relying purely on ambient discovery) from that same subdirectory then
+successfully connected to and called the server — discovery isn't just
+listing it, the server actually starts. Its dump showed:
+
+```
+cwd:                /home/mike/.../worktree/_rfc/archive/implemented
+CLAUDE_PROJECT_DIR:  /home/mike/.../worktree/_rfc/archive/implemented
+```
+
+Both point at the **launch subdirectory**, not the worktree root two levels up
+where `.mcp.json` actually lives. So the exact failure the operational hazard
+describes is confirmed directly: a server can be found and started from a
+subdirectory of the project, while simultaneously receiving a
+`CLAUDE_PROJECT_DIR` that does not point at the project's `.env`. `./.env`
+(candidate 4) would also miss in this scenario, since it resolves against the
+same launch-directory `cwd`. There is no candidate in the `config-resolution`
+topic's four-candidate list that resolves correctly here except an explicit
+`--env-file` or `$SHDOC_ENV_FILE`.
+
+## A3. Does `${CLAUDE_PROJECT_DIR}` expand inside `.mcp.json`'s `args`?
+
+**No — it is passed through as the literal, unexpanded string.** [OBSERVED]
+
+`.mcp.json` was configured with:
+
+```json
+"args": ["<probe.py>", "<dump-path>", "--env-file", "${CLAUDE_PROJECT_DIR}/.env"]
+```
+
+Tested twice — once spawned via `--mcp-config .mcp.json --strict-mcp-config`,
+once via plain ambient discovery of the same file (the way a shipped project
+would actually use it, with no CLI flags) — and in both cases the probe
+server's dumped `argv` contained the four-element literal
+`['<probe.py>', '<dump-path>', '--env-file', '${CLAUDE_PROJECT_DIR}/.env']`.
+The placeholder was never substituted; the server would receive the literal
+string `${CLAUDE_PROJECT_DIR}/.env` as its `--env-file` argument, which as a
+path does not exist. **Do not recommend
+`"args": ["--env-file", "${CLAUDE_PROJECT_DIR}/.env"]` in any setup
+instructions** — it silently passes a literal, not a resolved path, and would
+fail exactly the way the `config-resolution` topic's existing findings predict
+for `${VAR}` expansion of other variables: this failure mode is specific
+neither to Claude Desktop nor to secrets, it reproduces on the plain Claude
+Code CLI for a value the client itself injects.
+
+## A4. Does a `SessionStart` hook run early enough, and can it influence the spawned server's environment?
+
+**A hook cannot influence the environment a spawned MCP server receives —
+observed directly, not just inferred from OS process semantics — and hook
+timing relative to MCP spawn is not a reliable "before" either.** [OBSERVED],
+corroborated by [DOCUMENTED]
+
+A `SessionStart` hook was configured (via a temporary
+`.claude/settings.local.json`, removed afterward) to write a
+high-resolution timestamp to a file and then `export MARKER_ENV=set_by_hook`
+in its own shell. The probe MCP server's dump was checked for that variable:
+
+```
+hook fired_at (epoch):        1788469922.651169878
+MCP server dumped_at (epoch): 1788469922.5626595      (~88ms earlier)
+MARKER_ENV in server's environ: None
+```
+
+Two findings follow:
+
+- **`export` inside a hook's shell process never reaches the MCP server's
+  environment.** [OBSERVED] The hook and the MCP server are separate child
+  processes of Claude Code; a shell `export` only affects that shell process
+  and its own children, and is discarded when the hook process exits — this
+  matches ordinary POSIX process semantics, and it was confirmed directly
+  rather than assumed. There is also no documented JSON-output field a
+  `SessionStart` hook can return that would inject or override an environment
+  variable for a downstream MCP server — its available output fields are
+  `hookSpecificOutput`, `systemMessage`, `terminalSequence`, and
+  `additionalContext` [DOCUMENTED], none of which touch a spawned process's
+  environment.
+- **The MCP server's own startup was not strictly after the hook completed** —
+  in this run it was about 88ms *before* the hook finished writing its file.
+  [OBSERVED] This matches Claude Code's own documentation: "`SessionStart` and
+  `Setup` typically fire before servers finish connecting, so hooks on those
+  events should expect the 'not connected' error on first run" [DOCUMENTED] —
+  i.e. the two are not sequenced the way "validate, then spawn" would need.
+
+**Verdict: this option is closed.** Even setting aside the ordering problem, a
+hook has no channel to influence the environment the MCP server actually
+receives, so a `SessionStart` hook cannot be used to detect or correct a wrong
+`CLAUDE_PROJECT_DIR` before the server reads its `.env`.
+
+## Addendum summary
+
+| Question | Verdict | Basis |
+|---|---|---|
+| Can `CLAUDE_PROJECT_DIR` be pinned independently of the launch directory? | No — not via `--add-dir`, a shell preset, `settings.json`, or any CLI command in this version | [OBSERVED] (`--add-dir`, shell preset) + [DOCUMENTED — absence] (`settings.json`, env-vars, CLI commands) |
+| Does `.mcp.json` discovery walk up, and does `CLAUDE_PROJECT_DIR` walk up with it? | Discovery walks up; `CLAUDE_PROJECT_DIR` stays pinned to the launch directory — they disagree, exactly as feared | [OBSERVED] |
+| Does `${CLAUDE_PROJECT_DIR}` expand in `.mcp.json`'s `args`? | No — passed through as a literal string, both via `--mcp-config` and plain ambient discovery | [OBSERVED] |
+| Can a `SessionStart` hook fire early enough / influence the server's environment? | No — timing is not reliably "before," and there is no channel from a hook to a sibling process's environment | [OBSERVED] + [DOCUMENTED] |
+
+## Recommendation
+
+**Given only what was verified to actually work, the honest answer is:
+instruct users to launch `claude` from the project root, and treat that as a
+convention to state clearly rather than a mechanism the client enforces.**
+Nothing tested here lets a project make `CLAUDE_PROJECT_DIR` reliable from an
+arbitrary subdirectory. Ranked from most to least robust, given what was
+verified:
+
+1. **`--env-file <path>` or `$SHDOC_ENV_FILE` (candidates 1–2 in the
+   `config-resolution` topic), with an absolute path.** The only mechanisms in
+   the existing candidate list that do not depend on the launch directory at
+   all. Since a value in `.mcp.json`'s `env` block is a plain string, not
+   subject to `${VAR}` expansion problems (per A3, no expansion is needed or
+   attempted for a literal absolute path), a project can hardcode
+   `SHDOC_ENV_FILE` to an absolute path in a **local**, gitignored file (e.g.
+   `.mcp.json` at local/user scope, or `.claude/settings.local.json`'s `env`
+   key) — never in the committed project-scope `.mcp.json`, since that value
+   would be the same absolute path for every clone and machine, which defeats
+   portability, and more importantly because a per-machine absolute path
+   baked into a committed file is exactly the brittleness `.env` itself exists
+   to avoid.
+2. **State the launch-directory convention explicitly in the project's
+   setup/README instructions**, e.g. "run `claude` from this project's root
+   directory" — and rely on the server's existing startup stderr log line
+   (already decided in the `config-resolution` topic) as the fast, cheap way
+   a user notices they violated the convention, rather than hitting a
+   confusing auth error several tool calls later.
+3. **Do not rely on `./.env`, candidate 4.** It was already documented as the
+   last-resort, most-fragile candidate; A2 shows directly that it fails in
+   the same subdirectory-launch scenario that breaks `CLAUDE_PROJECT_DIR`,
+   for the same reason — both resolve against the launch `cwd`.
+4. **Do not recommend `${CLAUDE_PROJECT_DIR}` expansion in `.mcp.json`'s
+   `args`** (A3) or a `SessionStart` hook as a safety net (A4) — both were
+   tested and found not to work.
+
+This doesn't require touching RFC 0006's decision — candidates 1 and 2 already
+exist for exactly this reason, per its own text: "Candidates 1 and 2 are
+escape hatches for clients that set no such variable, and for pointing a
+server at a `.env` outside the project." What changes is that this addendum
+shows the escape hatch is needed more often than "clients that set no such
+variable" implies — it's also needed for a `claude`-launched session with a
+subdirectory-launched working directory, which is a mainstream Claude Code
+usage pattern, not an edge case. Whether to promote `--env-file`/
+`SHDOC_ENV_FILE` from escape hatch to primary recommendation, or to soften the
+`CLAUDE_PROJECT_DIR` candidate's framing, is a design call for the RFC to make
+— not something this reference file should decide.
