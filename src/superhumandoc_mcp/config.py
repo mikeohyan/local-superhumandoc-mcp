@@ -6,9 +6,15 @@ the `config-resolution` topic; see `_rfc/README.md`.
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 _AFFIRMATIVE = frozenset({"1", "true", "yes", "on"})
+_PREFIX = "SHDOC_"
+_REQUIRED = ("SHDOC_API_KEY", "SHDOC_DOC_ID")
+_FLAG = "SHDOC_ALLOW_DESTRUCTIVE"
 
 
 def parse_affirmative(value: str | None) -> bool:
@@ -50,3 +56,63 @@ def resolve_env_file(
 
     candidate = cwd / ".env"
     return candidate if candidate.is_file() else None
+
+
+@dataclass(frozen=True)
+class Config:
+    api_key: str
+    doc_id: str
+    allow_destructive: bool
+    log_level: str
+    env_file: Path | None
+    sources: dict[str, str] = field(default_factory=dict)
+
+
+def load_config(
+    cli_path: str | None, environ: Mapping[str, str], cwd: Path
+) -> Config:
+    env_file = resolve_env_file(cli_path, environ, cwd)
+    if env_file is None:
+        raise ConfigError(
+            "No .env found. Looked for --env-file, $SHDOC_ENV_FILE, "
+            "$CLAUDE_PROJECT_DIR/.env and ./.env."
+        )
+
+    # Only this server's own variables. A project .env legitimately holds other
+    # credentials, and none of them belong in this process.
+    from_file = {
+        key: value
+        for key, value in dotenv_values(env_file).items()
+        if key.startswith(_PREFIX) and value is not None
+    }
+    from_env = {k: v for k, v in environ.items() if k.startswith(_PREFIX)}
+
+    resolved: dict[str, str] = {}
+    sources: dict[str, str] = {}
+    for key in set(from_file) | set(from_env):
+        if key in from_env:
+            resolved[key], sources[key] = from_env[key], "environment"
+        else:
+            resolved[key], sources[key] = from_file[key], "file"
+
+    missing = [key for key in _REQUIRED if not resolved.get(key)]
+    if missing:
+        # Never interpolate a value here; one of them is the token.
+        raise ConfigError(
+            f"{', '.join(missing)} not set. Resolved .env: {env_file}"
+        )
+
+    # The flag is the one exception to the precedence above: when the file and
+    # the environment disagree, the restrictive answer wins, so a stale export
+    # cannot arm a destructive tool in a project that disables it.
+    present = [v for v in (from_file.get(_FLAG), from_env.get(_FLAG)) if v is not None]
+    allow_destructive = bool(present) and all(parse_affirmative(v) for v in present)
+
+    return Config(
+        api_key=resolved["SHDOC_API_KEY"],
+        doc_id=resolved["SHDOC_DOC_ID"],
+        allow_destructive=allow_destructive,
+        log_level=resolved.get("SHDOC_LOG_LEVEL", "INFO"),
+        env_file=env_file,
+        sources=sources,
+    )
