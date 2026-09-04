@@ -167,9 +167,19 @@ looking like a defect, which saves a future session a debugging session chasing 
 limiter bug that does not exist.
 
 **Makes hard.** Doc-content writes run at 3 per 10 seconds rather than 5 — forty
-percent slower on the tightest bucket in the API, which is also the bucket that
-page-markdown reads consume, since the export kickoff is a POST. Batch operations
-will feel it.
+percent slower on the tightest bucket in the API. Batch operations will feel it.
+
+Page-markdown reads were originally counted in that cost, on the reasoning that
+the export kickoff is a POST and so must draw on the doc-content-write bucket.
+**Probe P6 refuted this on 2026-09-04.** Six export POSTs fired back-to-back,
+under two seconds for the whole loop, all returned 202 — well over both published
+figures for that bucket, with nothing throttled. Export traffic is also served by
+a visibly separate backend pod class (`x-coda-server: api-doc`, against `api` for
+`/whoami` and `/docs/{docId}/tables`), which is consistent with a separate bucket
+without proving one. So reads of page markdown do not compete with doc-content
+writes for the tightest bucket in the API, and a throttle that serialises them
+against each other would be needlessly slow. The evidence is at
+`docs/validation/2026-09-03-api-operational-probes.md`.
 
 **Commits us to.** A drift check that is explicitly incomplete. This RFC records
 that the fingerprint cannot see undocumented behaviour, which means the project
@@ -178,10 +188,21 @@ forum-documented behaviour. That gap is now known rather than assumed away, but
 it is not closed.
 
 **Watch for.** Probe P6 in `docs/validation/2026-09-03-api-operational-probes.md`
-is the only ethical way to establish whether a real 429 carries a `Retry-After`
-header, and running it would also confirm or refute the 3-per-10-seconds figure.
-If the enforced limit turns out to be 5, the conservative operating value should
-be revisited — which is a bounded change to a constant, not a supersede, because
+was run on 2026-09-04 and settled less than was hoped. It refuted the export
+bucket assumption recorded above, but it never provoked a 429, so **whether a
+real 429 carries `Retry-After` remains empirically unresolved** — as does the
+3-versus-5 figure for doc-content writes. No 429 was seen anywhere in that
+session, across every probe run.
+
+That question stays open deliberately. P6 is bounded at exactly six requests
+because these buckets are shared per user and possibly per IP, so exhausting one
+degrades service for every other client behind the same identity or egress
+address. Six was not enough to reach a 429 here. **The bound is not to be lifted
+to chase the answer.** The honest way to close the question is a 429 encountered
+in normal operation, not one manufactured.
+
+If the enforced limit does turn out to be 5, the conservative operating value
+should be revisited — a bounded change to a constant, not a supersede, because
 this RFC decides the *rule* (throttle to the most conservative published figure)
 rather than the number.
 
