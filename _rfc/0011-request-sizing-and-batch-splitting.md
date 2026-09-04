@@ -67,10 +67,14 @@ body is recorded, and reading it is the whole of what is known about its shape:
 that body carries no field identifying which row of a batch was at fault, and no
 vendor statement says whether a richer error exists.
 
-**The refusal is a 400, not a 413** [real error paste]: *"I got a 400 error:
-'request entity too large'"*. A forum search for `413` returns nothing. A size
-failure is therefore indistinguishable by status code from any other malformed
-request, and only the message text separates them.
+**The refusal is a 400, not a 413, and it carries nothing structured to match
+on.** A 2.5 MB write was answered `{"statusCode":400,"statusMessage":"Bad
+Request","message":"request entity too large"}` — observed directly rather
+than quoted from a report, and the bare `BadRequestError` shape with no
+`codaType` and no `codaDetail`, where a schema-validation 400 on the same API
+carries both. A size failure is therefore separable from any other malformed
+request by its message text and by nothing else. That is not a shortcut this
+RFC is taking; it is the only handle the API offers.
 
 **Nothing in the specification bounds a batch** [SPEC-VERIFIED]. The whole
 document contains zero `maxItems`, and `RowsUpsert.rows`, `RowsDelete.rowIds`
@@ -450,7 +454,8 @@ size, so the cost of shrinking grows with how far the listing got.
 than estimating from inputs, so the chunker cannot be a pure function of the
 caller's rows. And carrying a message-text match — `exceeds maximum size`,
 `entity too large` — as the discriminator for a size refusal, because the API
-answers 400 for everything and has never been observed to use 413. Reading that
+answers 400 for everything, was observed doing so for an oversized body, and has
+never been seen to use 413. Reading that
 message at all is a change to the shipped client: `UpstreamRefused` accepts a
 `detail` argument but stores neither it nor the status as a value, and the
 request chokepoint never passes one, so today a caller cannot see why a 400 came

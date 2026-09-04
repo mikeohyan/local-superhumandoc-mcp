@@ -385,10 +385,35 @@ covering all non-formula columns plus overhead, with rich text stored as JSON an
 likely UTF-16 accounting. The claim that formula columns are excluded is
 unconfirmed by anyone at Coda.
 
-**An oversized body returns 400, not 413** [real error paste]: *"I got a 400 error:
-'request entity too large'"* (<https://connect.superhuman.com/t/x/10826/1>). A
-forum search for `413` returns zero posts. Treat a 400 matching
-`entity too large` or `exceeds maximum size` as **non-retryable** and re-chunk.
+**An oversized body returns 400, not 413** — **directly observed 2026-09-04**,
+upgrading this from a forum report to a first-party measurement. A 2,500,102-byte
+`PUT /docs/{docId}/pages/{pageId}` carrying a `contentUpdate` in `append` mode was
+answered in 0.25 s with HTTP 400 and this body, complete and verbatim:
+
+```json
+{"statusCode":400,"statusMessage":"Bad Request","message":"request entity too large"}
+```
+
+Response headers carried `x-coda-server: api-doc`, and `curl` reported the full
+2.5 MB as uploaded, so the refusal comes from the application after the body is
+transmitted rather than from the CDN edge. The message text matches the 2023 forum
+paste (<https://connect.superhuman.com/t/x/10826/1>) word for word. A forum search
+for `413` still returns zero posts.
+
+**The size refusal carries no structured discriminator** [observed 2026-09-04].
+The body is the bare `{statusCode, statusMessage, message}` shape with **no
+`codaType` and no `codaDetail`** — unlike the schema-validation 400 that probe P3
+recorded on `listPageContent`, which carries `codaType:
+"RequestSchemaValidationFailed"` and `codaDetail.issues`. So the two 400 shapes are
+distinguishable from each other, but a size refusal is separable from a plain
+`BadRequestError` **only by its message text**. Nothing structured exists to match
+on. This was tested because a client that must react to a size refusal needs a
+discriminator, and a field would have been far more durable than a substring.
+
+**Still unmeasured on the row side.** The above is the *request* ceiling (2 MB).
+The *row* ceiling's message — `"Row edit of size 87 KB exceeds maximum size of
+85 KB."` — remains a forum paste only; whether it carries `codaType` has never been
+observed, because provoking it needs a table row and probe P7 has not run.
 
 **No maximum rows per upsert has ever been published.** [SPEC-VERIFIED] The entire
 spec contains **zero** `maxItems`, and no `maxLength` on any docs-domain schema —
