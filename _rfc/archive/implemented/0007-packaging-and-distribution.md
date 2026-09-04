@@ -1,13 +1,13 @@
 ---
 rfc: 0007
 title: Package with hatchling and distribute via uvx from pinned git tags
-status: Accepted
+status: Implemented
 created: 2026-09-03
 decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: packaging
-commits: []
+commits: [0dea451e478a245e6a8fb1dd6d55f52ccf5da473, 5d3391760363bc9fd7865951421b7e25165f6a27, 3d9acfbb8fa92e61862a34f724a844ab8d7ceae2]
 tags: [architecture, packaging, dependencies, python]
 ---
 
@@ -256,4 +256,46 @@ revalidation if the situation ever arises.
 
 ## Implementation notes
 
-Left empty at Proposed.
+Shipped on 2026-09-04 as "Wave 1": the package, its build, its entry point, its
+server factory, and its test harness — an empty but real MCP server that starts,
+speaks stdio, and registers zero tools. The seventeen tools, `.env` resolution
+and the rate-limit throttle were deliberately excluded; they belong to the
+`tool-surface`, `config-resolution` and `upstream-api` topics. Wave 1 made no
+Superhuman Docs API call at all.
+
+`pyproject.toml` matches the Decision block's TOML verbatim. Nothing in the
+Decision was contradicted or renegotiated during implementation.
+
+**Verified before this transition**, on the merged `main` rather than in a
+branch, and by an agent that had not built the package: `uv build --wheel`
+exits 0 and produces a wheel containing all three modules plus a correct
+`entry_points.txt`; `uvx` runs the console script from that wheel and exits 0;
+a real `uvx`-spawned **stdio subprocess** completes `initialize()` (server name
+`superhumandoc-mcp`, protocol `2025-11-25`) and returns `tools=[]`; `uv.lock`
+contains no `name = "httpx"`, only `httpx2`; five tests pass. The subprocess
+check is the one that matters, because the in-process `mcp.Client` path
+exercises neither the console script, nor the wheel, nor `run()`'s transport
+argument.
+
+**Added beyond the Decision block.** `pytest` and `pytest-asyncio` as dev
+dependencies under `[dependency-groups]`, with `asyncio_mode = "auto"` and
+`testpaths = ["tests"]`. The Decision block is silent on dev dependencies and
+test runners, so this contradicts nothing, but it does pin dependencies and set
+a convention every test file then follows. It was raised rather than assumed,
+and the owner ruled it an implementation detail needing no RFC: development
+tooling sits below the RFC threshold, while runtime dependencies stay above it.
+`.gitignore` also gained `dist/` and `build/`.
+
+**Shipped without a tag, deliberately.** The Distribution section describes
+projects installing the server with
+`uvx --from git+https://github.com/USER/REPO@v0.1.0 superhumandoc-mcp`, and
+**that path has not been exercised.** What was verified is its local
+equivalent — `uvx --from` against a built wheel — which covers the console
+script, the entry point and the wheel, but not the git clone, not tag
+resolution, and not uv's caching of a resolved commit hash. No tag was cut and
+nothing was pushed to `origin`, because this RFC's own rule is that a published
+tag is never moved, which makes tagging one-way. Implemented here means the
+package is built and runs, not that the documented distribution path has been
+demonstrated end to end. Cutting `v0.1.0` and confirming that command against
+the real remote remains outstanding, and is a bounded verification task rather
+than a new decision.
