@@ -63,12 +63,22 @@ carry the secret. The server has to find its own configuration.
 ## Decision
 
 The server loads its own `.env` at startup, resolving the file from four
-candidates in order and taking the first that exists:
+candidates in order:
 
 1. an explicit `--env-file <path>` command-line argument
 2. `$SHDOC_ENV_FILE`
 3. `$CLAUDE_PROJECT_DIR/.env`
 4. `./.env`, relative to whatever working directory the client happened to set
+
+**A candidate that was asked for explicitly is not allowed to fall through.**
+Candidates 1 and 2 name a path directly, so if that path does not exist the
+server **fails at startup and says which path was missing**. It does not quietly
+try the next candidate. The alternative is the worst failure this design can
+produce: a typo in `--env-file` silently resolving to some other project's
+`.env`, binding the server to the wrong document with a token that works. An
+explicit path is a statement about intent, and the only safe response to an
+intent that cannot be honoured is to stop. Candidates 3 and 4 are inferred
+rather than stated, so a miss there is ordinary and falls through as normal.
 
 Candidate 3 carries normal operation when `claude` is launched from the project
 root, which is the common case. Claude Code sets `CLAUDE_PROJECT_DIR` in the
@@ -96,10 +106,30 @@ receives the literal string; and a `SessionStart` hook can neither be relied on
 to run before the server spawns nor influence the environment it receives. Both
 were tested; see `docs/reference/mcp-client-environment.md`.
 
-The file is loaded with `override=False`. Real environment variables therefore
-win over file contents, so anything a client injects through `.mcp.json`'s `env`
-block takes precedence over the `.env` — which is the intuitive precedence, and
-the one that lets a project override a single value without editing its file.
+**Only `SHDOC_`-prefixed keys are read out of the file, and the file is not
+exported into the process environment.** A project `.env` is a project's file,
+not this server's: it routinely holds database passwords, cloud credentials and
+third-party keys that have nothing to do with Superhuman Docs. Loading it
+wholesale into `os.environ` would put every one of them inside a process that
+talks to the network, for no benefit — the server needs five variables and knows
+all of their names. Reading only its own prefix keeps the blast radius of a
+compromised or over-curious dependency to the credential this server was always
+going to hold.
+
+Within that prefix, values are resolved with real environment variables winning
+over file contents — the equivalent of `override=False`, and the intuitive
+precedence, since it lets a project override a single value through
+`.mcp.json`'s `env` block without editing its file.
+
+**`SHDOC_ALLOW_DESTRUCTIVE` is the exception: disagreement resolves to the
+restrictive value.** If the environment enables the destructive tools and the
+`.env` does not, they stay unregistered. Ordinary precedence is a convenience
+rule, and applying it to this flag would let a `SHDOC_ALLOW_DESTRUCTIVE=1`
+exported into a shell months ago and long forgotten silently arm whole-page
+overwrite in every project launched from that shell — including projects whose
+own `.env` explicitly disables it. A user who wants the tools in a project can
+say so in that project. The startup line names the source of each resolved
+value, file or environment, so an override is visible rather than inferred.
 
 **The server logs the resolved `.env` path to stderr at startup.** This is not a
 diagnostic nicety. Every failure mode above is silent: the wrong file loads, or
@@ -160,18 +190,20 @@ secrets and needs no expansion:
     "superhumandoc": {
       "type": "stdio",
       "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.1.0",
-        "superhumandoc-mcp"
-      ]
+      "args": ["--from", "<pinned source>", "superhumandoc-mcp"]
     }
   }
 }
 ```
 
-The distribution mechanism in `command` and `args` is decided separately; this
-RFC fixes only that nothing sensitive appears here.
+`command` and `args` belong to RFC 0007, and `<pinned source>` is deliberately
+not spelled out here: a concrete repository URL and version tag written into
+this RFC would freeze, in a configuration decision, a distribution detail that
+is another RFC's to change. The README carries the form a user copies.
+
+What **this** RFC fixes is the shape of the rest: there is no `env` block and no
+`${VAR}` anywhere in the stanza. Both are absent by design rather than by
+omission, and the Alternatives below explain why neither can carry the token.
 
 ### Token scope
 
