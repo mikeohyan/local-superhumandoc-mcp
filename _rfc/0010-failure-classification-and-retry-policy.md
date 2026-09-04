@@ -1,9 +1,9 @@
 ---
 rfc: 0010
 title: Classify transport failures by whether the request was transmitted, and bound every retry by one deadline
-status: Proposed
+status: Accepted
 created: 2026-09-04
-decided:
+decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: failure-policy
