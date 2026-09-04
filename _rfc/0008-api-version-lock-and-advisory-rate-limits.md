@@ -1,9 +1,9 @@
 ---
 rfc: 0008
 title: Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory
-status: Proposed
+status: Accepted
 created: 2026-09-03
-decided:
+decided: 2026-09-04
 supersedes: 0002
 superseded_by:
 topic: upstream-api
@@ -69,7 +69,9 @@ Everything RFC 0002 decided about the pin itself is carried forward unchanged:
 - **Spec fingerprint:** SHA-256
   `d145ed596a33830548e1ceac6668df94c10b71491800d0855bc0711472d0224b`. Confirmed
   on 2026-09-03 to be identical across an initial fetch and an independent
-  re-fetch later the same day.
+  re-fetch later the same day, and again on 2026-09-04 from a third fetch made
+  while reading the endpoint inventory — so the digest has now held across two
+  days rather than one sitting.
 - **Authentication:** HTTP bearer, `bearerFormat: UUID`, in the `Authorization`
   header, read from `.env` per RFC 0006 and never committed.
 
