@@ -816,7 +816,49 @@ incident; the `TOOL_CALL_DEADLINE_S` ceiling exists partly for this.
 
 ---
 
-# 6. Primary sources
+# 6. Endpoint inventory — what v1.6.0 does and does not contain
+
+Read directly out of the served OpenAPI document on 2026-09-04 [SPEC-VERIFIED].
+`https://coda.io/apis/v1/openapi.json`, `info.version: 1.6.0`, 92 paths.
+YAML-rendering digest at the same moment:
+`d145ed596a33830548e1ceac6668df94c10b71491800d0855bc0711472d0224b`.
+
+**Absent from the surface.** These were checked because a design decision turns
+on them, and each is an absence in the specification rather than an inference:
+
+- **No comment endpoint of any kind.** No path contains the substring
+  `comment`.
+- **No table creation.** Every `/tables` path is GET-only except the row
+  collections. The complete set of `create*` operations in the whole document is
+  `createDoc`, `createPage`, `createFolder`, and four Packs operations
+  (`createPack`, `createPackInvitation`, `createPackRelease`,
+  `createPackReview`). Nothing creates a table, and nothing creates a column.
+- **No transaction or rollback.** The only paths matching `batch` belong to Packs
+  ingestion and are unrelated. The write model is the asynchronous one —
+  `/mutationStatus/{requestId}` — which has no concept of grouping writes or
+  undoing them.
+
+The vendor's own MCP server offers all three (`table_create`, comments as a
+content channel, atomic multi-operation editing with rollback). They are
+capabilities of that server, not of this REST surface, so a client built on v1
+cannot reach them by trying harder.
+
+**Present, and easy to miss.** `DELETE /docs/{docId}/pages/{pageIdOrName}/content`
+— `deletePageContent`, *"Delete content from a page. You can delete specific
+elements by providing their IDs, or delete all content from the page."* Clearing
+a page is therefore a first-class operation with its own endpoint, **not** a
+whole-page `replace` carrying an empty payload. The same endpoint also deletes
+named elements by ID, which is a narrower destructive primitive than a
+whole-page write.
+
+The page write surface in full: `POST /docs/{docId}/pages` (create),
+`PUT /docs/{docId}/pages/{pageIdOrName}` (`updatePage`, which carries
+`contentUpdate`), `DELETE` on the page itself, `DELETE .../content` as above,
+`GET .../content` (`listPageContent`, synchronous), and
+`POST .../export` + `GET .../export/{requestId}` for the asynchronous markdown
+or HTML read.
+
+# 7. Primary sources
 
 | Source | Establishes |
 |---|---|

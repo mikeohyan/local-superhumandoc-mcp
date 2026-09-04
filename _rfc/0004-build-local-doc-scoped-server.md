@@ -59,14 +59,26 @@ per-document requirements outright. The leading community server is local and
 document-scoped and would otherwise serve, but it is a Node package and cannot
 be pinned into a Python project the way this project requires.
 
-Owning the implementation is not only a toolchain convenience. The behaviour of
-the underlying page endpoints is materially more hazardous than their
-documentation suggests — markdown is a lossy projection of a Superhuman Docs
-page, and the vendor states these endpoints are "best used for import or export
-scenarios, not page editing". A server that exposes them to a language model
-without accounting for that will silently destroy content. Existing
-implementations do not account for it. Owning the code is what lets the tool
-surface encode those constraints, and that surface is specified in RFC 0005.
+Owning the implementation is not only a toolchain convenience. The underlying
+page endpoints are more hazardous than a casual reading of their documentation
+suggests: markdown is a lossy projection of a Superhuman Docs page, and the
+vendor states these endpoints are "best used for import or export scenarios,
+not page editing". A server that exposes them to a language model without
+accounting for that risks silently destroying content, and existing
+implementations do not account for it.
+
+**How much is destroyed, and by which construct, is not yet measured.** The
+severity rests on the vendor's own hedge plus desk research, not on observation;
+`docs/validation/2026-09-03-markdown-fidelity-tests.md` was written to settle it
+and has not been run. What is confirmed is the direction — images are omitted
+from markdown export while HTML retains them, staff-confirmed — and that the
+whole-page replace case is rated likely destructive and unconfirmed. The
+argument for owning the code does not depend on the magnitude: an existing
+server that ships the round trip with no warning at all is the problem
+regardless of where the true severity lands.
+
+Owning the code is what lets the tool surface encode those constraints, and that
+surface is specified in RFC 0005.
 
 Configuration and credential resolution are specified in RFC 0006. Packaging and
 distribution are specified in RFC 0007.
@@ -161,8 +173,9 @@ a new RFC rather than a reversal of this one.
 
 ### Shape tools around workflows rather than endpoints
 
-The chosen approach: roughly a dozen tools organised around what an agent is
-trying to accomplish, each absorbing an API mechanic the model should not have to
+The chosen approach: tools organised around what an agent is trying to
+accomplish — twelve registered always and five more behind the destructive
+flag — each absorbing an API mechanic the model should not have to
 think about — pagination handled internally, asynchronous writes polled until
 applied and any warning surfaced, markdown conversion hidden behind a single read.
 
@@ -186,7 +199,11 @@ polling, mutation polling, column metadata caching, error translation. The
 vendor's server will very likely stay ahead on capability, and some of what it
 does — table creation, comments, atomic multi-operation rollback — is not
 reachable from the v1 REST API at all, so this server cannot match it by
-trying harder.
+trying harder. That was read directly out of the served specification rather
+than assumed: `info.version` 1.6.0 contains no path mentioning comments, no
+operation that creates a table or a column, and no transaction or rollback
+concept anywhere in its asynchronous write model. The inventory is recorded at
+`docs/reference/api-operational-constants.md`.
 
 **Commits us to.** Tracking API drift ourselves under RFC 0008, with no vendor
 library absorbing the change. Carrying the maintenance of a client for an API

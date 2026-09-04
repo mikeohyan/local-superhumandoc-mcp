@@ -217,12 +217,21 @@ blast radius is unbounded and cannot be declared in advance. `overwrite_page` is
 whole-page replacement, and is the operation the vendor's warning is about.
 
 `clear_page_content` empties a page while leaving the page itself in place. It
-is whole-page `replace` with an empty payload, which makes it `overwrite_page`
-with the content argument fixed rather than a milder operation — so **it carries
-the same pre-write guard** and the same `force` override. Naming it separately
-is worth the duplication: "clear this page" is a thing a model will try to
-express, and without the tool it would reach for `overwrite_page` with an empty
-string, which is the more dangerous habit to teach.
+has its own endpoint — `DELETE .../pages/{id}/content`, which the specification
+describes as deleting either named elements or all content — so it is a
+first-class operation rather than a whole-page `replace` carrying an empty
+payload. That does not make it gentler: emptying a page destroys exactly what
+`overwrite_page` destroys, so **it carries the same pre-write guard** and the
+same `force` override. Naming it separately is worth the duplication: "clear
+this page" is a thing a model will try to express, and without the tool it would
+reach for `overwrite_page` with an empty string, which is the more dangerous
+habit to teach.
+
+That endpoint also deletes **specific elements by ID**, a narrower destructive
+primitive than this surface currently exposes. Whether that deserves its own
+gated tool — a targeted `delete_element` to sit beside `replace_element` — is
+left open here rather than settled in passing; the surface ships without it.
+The endpoint inventory is at `docs/reference/api-operational-constants.md`.
 
 ### Three safety mechanisms
 
@@ -244,8 +253,10 @@ dangerous.
 
 **3. `overwrite_page` and `clear_page_content` carry a pre-write guard.** They
 are the only tools with one, and they have it because they are the only two that
-write over content they did not read — every other write is additive or
-element-scoped. Before writing, the guard lists the document's tables, controls
+destroy content they did not read — every other write is additive or
+element-scoped. The mechanism differs between them, a write in one case and a
+delete in the other, but the blast radius is the same page either way, so the
+same check applies. Before writing, the guard lists the document's tables, controls
 and formulas and filters them on `parent.id == pageId` — all three schemas carry
 a `parent: PageReference`,
 which is what makes the check possible. If the page owns any such object the tool
