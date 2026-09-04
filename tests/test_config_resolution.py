@@ -72,3 +72,38 @@ def test_project_dir_without_an_env_file_falls_through_to_cwd(
     (cwd / ".env").write_text("")
     got = resolve_env_file(None, {"CLAUDE_PROJECT_DIR": str(project)}, cwd)
     assert got == cwd / ".env"
+
+
+def test_a_directory_is_not_reported_as_missing(tmp_path: Path) -> None:
+    """`is_file()` is false for a directory too, and telling someone a path
+    they can see does not exist sends them looking for the wrong problem."""
+    (tmp_path / "somedir").mkdir()
+    with pytest.raises(ConfigError) as excinfo:
+        resolve_env_file(str(tmp_path / "somedir"), {}, tmp_path)
+    message = str(excinfo.value)
+    assert "directory" in message
+    assert "does not exist" not in message
+
+
+def test_an_empty_path_is_named_as_empty_and_does_not_fall_through(
+    tmp_path: Path,
+) -> None:
+    """An empty value resolves to the current directory, so the old message
+    claimed the cwd did not exist. It still must not fall through."""
+    (tmp_path / ".env").write_text("SHDOC_DOC_ID=wrong-document\n")
+    with pytest.raises(ConfigError) as excinfo:
+        resolve_env_file("", {}, tmp_path)
+    assert "empty value" in str(excinfo.value)
+
+
+def test_an_empty_locator_variable_is_also_refused(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("")
+    with pytest.raises(ConfigError) as excinfo:
+        resolve_env_file(None, {"SHDOC_ENV_FILE": "   "}, tmp_path)
+    assert "empty value" in str(excinfo.value)
+
+
+def test_a_genuinely_missing_path_still_says_so(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        resolve_env_file(str(tmp_path / "typo.env"), {}, tmp_path)
+    assert "does not exist" in str(excinfo.value)

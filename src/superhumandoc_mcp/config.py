@@ -31,6 +31,23 @@ class ConfigError(Exception):
     """Configuration could not be resolved. The message is shown to the user."""
 
 
+def _why_unusable(value: str, path: Path) -> str:
+    """Say what is actually wrong with a path the user named.
+
+    `is_file()` is false for a missing path, a directory, and an empty value
+    that resolves to the current directory alike. Reporting all three as "does
+    not exist" tells the user to go looking for a file that is sitting right
+    where they put it, which is worse than saying nothing.
+    """
+    if not value.strip():
+        return "was set to an empty value"
+    if path.is_dir():
+        return f"names {path}, which is a directory rather than a file"
+    if path.exists():
+        return f"names {path}, which is not a regular file"
+    return f"names {path}, which does not exist"
+
+
 def resolve_env_file(
     cli_path: str | None, environ: Mapping[str, str], cwd: Path
 ) -> Path | None:
@@ -40,16 +57,26 @@ def resolve_env_file(
     a reason to try the next one: an explicit path is a statement of intent, and
     silently resolving elsewhere binds the server to the wrong document with a
     token that works. Candidates 3 and 4 are inferred, so a miss falls through.
+
+    An empty value counts as naming a path, not as leaving one unset. It
+    usually comes from a shell line that meant to set one and did not, and
+    falling through would resolve somewhere the user never chose -- the exact
+    outcome the rule above exists to prevent.
     """
-    for value, source in ((cli_path, "--env-file"), (environ.get("SHDOC_ENV_FILE"), "SHDOC_ENV_FILE")):
-        if value is not None:
-            path = Path(value).expanduser()
-            if not path.is_file():
-                raise ConfigError(
-                    f"{source} names {path}, which does not exist. "
-                    "Refusing to fall back to another .env."
-                )
-            return path
+    candidates = (
+        (cli_path, "--env-file"),
+        (environ.get(_LOCATOR), _LOCATOR),
+    )
+    for value, source in candidates:
+        if value is None:
+            continue
+        path = Path(value).expanduser()
+        if not path.is_file():
+            raise ConfigError(
+                f"{source} {_why_unusable(value, path)}. "
+                "Refusing to fall back to another .env."
+            )
+        return path
 
     project_dir = environ.get("CLAUDE_PROJECT_DIR")
     if project_dir:
