@@ -2,7 +2,10 @@
 
 **Date:** 2026-09-04
 **Target:** the build and distribution claims made by the `packaging` topic (see `_rfc/README.md`)
-**Status:** NOT YET RUN — see the empty Results section at the bottom.
+**Status:** RUN on 2026-09-04. All eight probes B1-B8 were executed against a
+scratch package built outside this repository. B1 refuted the claim it tests;
+B2-B8 confirmed theirs. See the Results section for raw output, and the closing
+section for the one claim the `packaging` topic needs to correct.
 
 ## What this plan settles
 
@@ -515,11 +518,6 @@ and transport selection happens at `server.run("stdio")` — a `run()`-time
 argument — never on `MCPServer()`'s constructor.
 
 ## Claims to correct in the `packaging` topic
-
-_(list each claim that the probes refuted or refined, with the probe that did
-it. The RFC is still Proposed, so its body may be amended rather than
-superseded — but that is a decision for an RFC-owning session, not for this
-file.)_
 
 - **B1 refutes the packaging topic's claim that omitting
   `[tool.hatch.build.targets.wheel] packages` under a `src/` layout "builds an
