@@ -326,9 +326,12 @@ What it does **not** affect: markdown/rich-text handling
 (<https://connect.superhuman.com/t/markdown-in-table-text-column-with-the-api/23141/4> —
 "it made no difference if I used the disableParsing parameter").
 
-**Rule: never send `disableParsing=true` on a payload that touches a relation, person,
-select, or date column.** Use it only to preserve literal text such as `"00123"`. Whether
-it also blocks *row-ID* resolution is untested — T5.
+What follows from that: `disableParsing=true` suppresses the parsing that
+relation, person, select and date columns depend on, so a payload touching one of
+those and carrying the flag cannot resolve as intended. Its one clearly safe use
+is preserving literal text such as `"00123"`. Whether it also blocks *row-ID*
+resolution is untested — T5. **No RFC decides whether the client ever sends this
+flag**, so that remains open.
 
 ---
 
