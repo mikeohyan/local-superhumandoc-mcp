@@ -57,15 +57,24 @@ The ratio is roughly two, from a single forum-reported data point in which the
 shows the same shape at 89 KB but carries no wire figure, so it cannot
 corroborate a ratio. The community explanation — that the ceiling counts the
 row's size in the stored document, rich text held as JSON and probably tallied
-in UTF-16 — is confirmed by nobody at Coda. Probe P7 exists to calibrate this and
-has never run, because it needs a table with a writable column and the scratch
-document has none. So the client is asked to stay under a limit expressed in
-units it cannot see.
+in UTF-16 — is confirmed by nobody at Coda. Probe P7 has since measured the plain
+text case directly: a 102,468-byte row was refused as "101 KB" and a 133,188-byte
+one as "131 KB", so for ASCII the internal size is the wire size plus about a
+kilobyte, a ratio near 1.0 rather than 2.2. That does not license relaxing the
+cap. It establishes the floor and shows the 2.0 ratio in the forum report cannot
+have come from plain text, which leaves the rich-text case — the one users
+actually write — still unmeasured. So the client is asked to stay under a limit
+expressed in units it can compute for the easy case and not for the real one.
 
-**That error body names a size and not a row.** It is the only size refusal whose complete
-body is recorded, and reading it is the whole of what is known about its shape:
-that body carries no field identifying which row of a batch was at fault, and no
-vendor statement says whether a richer error exists.
+**The refusal names a size and not a row, and this was tested rather than
+assumed.** An `upsertRows` carrying three rows, the middle one oversized, was
+refused with a message identical in form to the single-row case — it gives the
+offending row's size and nothing else: no index, no position, no identifier. A
+client that must find the bad row in a batch therefore has to subdivide and
+resend, because the API will not say. The size is a partial handle, since a caller
+knowing its own rows can sometimes match the figure back to one of them, but only
+when the sizes differ and only under a ratio the paragraph above shows is unknown
+for the content that matters.
 
 **The refusal is a 400, not a 413, and it carries nothing structured to match
 on.** A 2.5 MB write was answered `{"statusCode":400,"statusMessage":"Bad
@@ -98,12 +107,11 @@ call and makes it the sole authority; the operating value is ninety seconds,
 recorded in `docs/reference/api-operational-constants.md` and attributed there
 to the `upstream-api` topic. RFC 0005 requires every write to poll
 `getMutationStatus`. Probe P4 watched a mutation on a near-empty scratch
-document flip to `completed` between t=16 s and t=18 s — a floor, on the
-cheapest document that exists. That probe wrote page content rather than rows,
-because the scratch document has no table, so **no row write has ever been timed
-here at all**; the figure is the closest available and not a measurement of the
-operation these rules mostly govern. Four chunks of that shape exhaust the tool
-call. Whatever the byte caps say, the practical ceiling on a batch is the
+document flip to `completed` between t=16 s and t=18 s, and a later probe timed
+the operation these rules actually govern: a single-row insert carrying a
+fifteen-character value reported `completed` only between t=21.9 s and t=23.0 s,
+with a six-row delete taking about twelve. **The row path is the slower one**, so
+roughly three chunks of that shape exhaust the tool call rather than four. Whatever the byte caps say, the practical ceiling on a batch is the
 deadline.
 
 **Reads have the same problem from the other side, plus one of their own.** The
@@ -199,8 +207,8 @@ and deferred the rest to this wave. Ten rules follow.
    the caller's own input rather than an arbitrary subset. A single row cannot
    be split further, so the recursion terminates; that row is identified by
    having been alone in the refused request, which is the only way available,
-   since the observed error names a size and not a row. Its refusal ends that
-   branch and nothing else: the remaining chunks are still attempted.
+   since a batch refusal was observed to name a size and not a row. Its refusal
+   ends that branch and nothing else: the remaining chunks are still attempted.
    `update_row` is the degenerate case of all this, a chunk of one row with no
    halving to do, and it reports a size refusal the same way. Note what rule 3
    leaves for this rule to do: any row the estimate flags is already alone in
@@ -215,6 +223,10 @@ and deferred the rest to this wave. Ten rules follow.
    deadline — not the replay counter, which never sees it.
 
 6. **A split write reports every row's outcome and never a single verdict.**
+   A rejected chunk applies nothing — tested, with two valid rows sent beside
+   an oversized one and neither landing — so the unit a chunk reports on is the
+   whole chunk, and per-row reporting is bookkeeping over chunk results rather
+   than a claim the API supports row-level partial success.
    Four outcomes, not three: *applied* in RFC 0005's sense, *unknown* in RFC
    0010's, *refused* for a row the API answered with a size refusal, and *not
    attempted* — a state this RFC adds, for rows the deadline was reached before
@@ -225,7 +237,11 @@ and deferred the rest to this wave. Ten rules follow.
    the one thing the caller could have acted on. Outcomes are
    reported per row and keyed by the row's position in the caller's input,
    because a new row in an unkeyed upsert has no identifier of its own until the
-   API assigns one; `delete_rows` also carries the row ID, which it always has.
+   API assigns one. It does assign one promptly: `upsertRows` returns
+   `addedRowIds` in the 202, in request order, so an *applied* row can be
+   reported with its real id alongside its position, and `delete_rows` has the
+   id from the start. Position is what makes the four sets addressable when
+   there is no id yet, not a substitute for one where there is.
    There is no rollback to offer, so the only honest thing a partly-applied
    batch can do is say exactly how far it got. Reporting one aggregate result is
    wrong even when every chunk succeeded, because the caller then cannot
@@ -437,9 +453,9 @@ alone in its chunk, so it costs one round trip, not a binary-tree search. Rule 4
 recursion is reserved for the case the estimate got wrong, which is rarer and
 genuinely logarithmic in the chunk. What binds either case is arithmetic rather
 than a rule, and the two paths are bound by different arithmetic. A chunk that is
-*applied* costs a write plus a poll to completion, which probe P4 puts at sixteen
-to eighteen seconds, so about four of those fit in the eighty seconds the deadline
-leaves after its reserved tail. A chunk *refused* for size costs one round trip
+*applied* costs a write plus a poll to completion, measured at twenty-three
+seconds for a trivial row, so about three of those fit in the eighty seconds the
+deadline leaves after its reserved tail. A chunk *refused* for size costs one round trip
 and no poll at all, so what limits those is admission to the doc-content bucket at
 two per ten seconds — about sixteen in the same budget. Rule 7 needs no special
 case for this because it tests the time actually remaining rather than a running
@@ -469,12 +485,13 @@ dangerous, but it will look like a bug.
 **Accepted risk, unresolved.** Seven of the ten values in rule 10's table have
 no empirical support: the five marked `[CHOSEN — no evidence]` in `docs/`, plus
 `LIST_PAGE_SIZE_FLOOR` and `CHUNK_COST_ESTIMATE_S`, which this RFC names for the
-first time. `ROW_INFLATION_FACTOR` is the one the design leans on least and the
-only one with even a single observation behind it. Probe P7 would calibrate it and is blocked on a scratch table that does not
-exist; no probe in the existing plan targets the row-count, delete-count or
-page-content caps at all, so those would need new ones. Rule 4 is a real
-mitigation, but it means the first oversized batch a user sends costs extra
-round trips to discover a limit that could have been measured. Rule 9's ladder
+first time. `ROW_INFLATION_FACTOR` is now the best-supported of them and still
+only half measured: probe P7 pinned the plain-text ratio at about 1.0 and left
+the rich-text case, which is the one that drives the number, untouched. No probe
+in the existing plan targets the row-count, delete-count or page-content caps at
+all, so those would need new ones. Rule 4 is a real mitigation, but it means the
+first oversized batch a user sends costs extra round trips to discover a limit
+that could have been measured. Rule 9's ladder
 is untested in a different way: no 504 has ever been observed from this client,
 and both the halving and the floor are reasoning from a staff answer to somebody
 else's problem.

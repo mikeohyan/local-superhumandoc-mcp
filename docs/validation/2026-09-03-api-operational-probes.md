@@ -4,8 +4,9 @@
 **Target:** `https://docs.superhuman.com/apis/v1` (formerly Coda API v1; specs are byte-identical)
 **Status:** RUN on 2026-09-04. P1, P2, P3, P4, P5 (a/b/c), P6, and P9 were executed
 (P3/P4 adapted to a canvas-page content write in place of a table-row write, since
-the scratch doc has no table — see Results). P7 and P8 are NOT RUN — both require
-a table with a writable column, which does not exist in the scratch doc. See the
+the scratch doc had no table at the time — see Results). P7 RAN on 2026-09-04 once
+the doc gained tables; P8 is still NOT RUN, though it is no longer blocked — the
+table with a writable column it needs now exists. See the
 Results section for raw output and findings, several of which contradict the
 plan's or the constants file's assumptions.
 
@@ -495,7 +496,7 @@ are doc-size dependent.*
 **Doc used:** `6vqpBu-VYd` ("MCP Validator"), one page `canvas-4LiD-eeMTK` (`contentType: canvas`, "Untitled page"), **zero tables** (`GET /docs/6vqpBu-VYd/tables` → `{"items":[]}`, confirmed live before running anything). The page started empty; P3/P4/P5/P6 wrote probe content to it, so it ends this run non-empty by design.
 **Token owner / workspace:** Michael Yan, workspace "Prosperzero" (from `GET /whoami`).
 
-**Adaptation note (applies to P3, P4, P7, P8):** the plan's Setup section assumes a `$TABLE`/`$COL` pair. None exists in this scratch doc — confirmed above. P7 and P8 are genuinely NOT RUN (see their sections). P3 and P4 need *some* doc-content write to test staleness/mutation-status against, and the task scope named them as runnable with "only a canvas page," so they were adapted to use the one write operation a canvas page supports: `PUT /docs/{docId}/pages/{pageId}` with `contentUpdate: {insertionMode: "append", canvasContent: {format: "markdown", content: "..."}}` (`PageUpdate`/`PageContentUpdate` schemas, confirmed against a fresh fetch of `https://coda.io/apis/v1/openapi.yaml` this session). This is a doc-content-mutating request that returns a `requestId` via `DocumentMutateResponse`, exactly like a row write would, so `getMutationStatus` polling in P4 still applies unmodified. Every place below that deviates from the plan's literal commands is called out inline.
+**Adaptation note (applies to P3, P4, P7, P8):** the plan's Setup section assumes a `$TABLE`/`$COL` pair. None exists in this scratch doc — confirmed above. P7 was genuinely NOT RUN at that time and has since been run against a real table (see its section); P8 remains NOT RUN. P3 and P4 need *some* doc-content write to test staleness/mutation-status against, and the task scope named them as runnable with "only a canvas page," so they were adapted to use the one write operation a canvas page supports: `PUT /docs/{docId}/pages/{pageId}` with `contentUpdate: {insertionMode: "append", canvasContent: {format: "markdown", content: "..."}}` (`PageUpdate`/`PageContentUpdate` schemas, confirmed against a fresh fetch of `https://coda.io/apis/v1/openapi.yaml` this session). This is a doc-content-mutating request that returns a `requestId` via `DocumentMutateResponse`, exactly like a row write would, so `getMutationStatus` polling in P4 still applies unmodified. Every place below that deviates from the plan's literal commands is called out inline.
 
 ## P1 — Authenticated rate-limit headers
 
@@ -733,11 +734,41 @@ No 429 occurred, so the 60-second wait rule was not triggered.
 
 ## P7 — Row-size inflation factor
 
-**NOT RUN — requires a table with a writable column; none exists in the scratch doc.** The scratch doc `6vqpBu-VYd` has zero tables (`GET /docs/6vqpBu-VYd/tables` → `{"items":[]}`, confirmed in Setup). P7's write targets `$TABLE/rows`, which has no analogue on a canvas page — appending large markdown strings to the page would test page-content size limits, not row size limits, and would not calibrate `ROW_INFLATION_FACTOR`. Not attempted, to avoid recording a number that answers a different question than the one asked.
+**RUN 2026-09-04.** The scratch doc has since gained two tables; P7 ran against
+`grid-PH5-RNMCB1` (`test-table-01`), text column `c-euWseAF6J-`, ASCII payloads,
+one row per request, spaced six seconds.
+
+| Wire bytes | Result | Reported internal size |
+|---|---|---|
+| 30,788 | 202 accepted | — |
+| 41,028 | 202 accepted | — |
+| 51,268 | 202 accepted | — |
+| 61,508 | 202 accepted | — |
+| 81,988 | 202 accepted | — |
+| 102,468 | 400 refused | "101 KB" |
+| 133,188 | 400 refused | "131 KB" |
+
+**The ratio for plain ASCII is ≈1.01, not 2.2.** Internal size tracks wire size
+almost exactly, plus about a kilobyte of overhead, and the ceiling bites between
+82 KB and 102 KB of wire — consistent with the published 85 KB applied to something
+very close to the bytes sent. The plan anticipated this outcome and said what it
+means: *"All four accepted → plain ASCII inflates far less than 2×. Repeat with
+rich markdown before relaxing the cap."* That repeat has **not** been done, so the
+operating value stays at 2.2. What P7 establishes is the floor, and that the 2.0
+ratio in the 2023 forum report cannot have come from plain text.
+
+Deviation from the plan as written: it piped responses through
+`jq -r '.message // "OK (accepted)"'`, which discards the rest of the body. Since
+the question of whether a size refusal carries a structured discriminator was live,
+full bodies were kept instead. They do not — see §2.3 of the constants file.
+
+Cleanup: all six rows written by P7 and by the timing probe were deleted, the
+delete mutation was polled to `completed`, and a read-back confirmed the table
+returned to its original eleven rows.
 
 ## P8 — Sync-token deletion reporting
 
-**NOT RUN — requires deleting a row from a table; no table exists in the scratch doc.** Also out of scope per the task's explicit skip list. Not attempted.
+**NOT RUN, but no longer blocked.** It was originally skipped because the scratch doc had no table; the doc has since gained two, and a six-row `deleteRows` against `grid-PH5-RNMCB1` was executed successfully on 2026-09-04 during P7's cleanup, so the delete this probe needs is demonstrably available. It remains unrun because sync tokens were out of scope for that session, not because anything blocks it.
 
 ## P9 — Synchronous page-content read
 

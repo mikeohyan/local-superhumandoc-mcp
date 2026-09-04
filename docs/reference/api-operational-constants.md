@@ -136,7 +136,7 @@ encodes this explicitly, treating 429 as retryable even for non-idempotent verbs
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
 | `MAX_REQUEST_BYTES` | `1_500_000` (1.5 MB) | [STAFF] on the ceiling, [CHOSEN] on the margin | Published cap is **2 MB**; 25% headroom for encoding overhead |
-| `ROW_INFLATION_FACTOR` | `2.2` | [CHOSEN — no evidence, tune later] | Single data point: a 44 KB `Content-Length` request was rejected as "87 KB". Ratio ≈2.0; 2.2 adds margin. Must be re-measured — see probe P7 |
+| `ROW_INFLATION_FACTOR` | `2.2` | **[MEASURED as a floor, 2026-09-04]** on plain text, [STAFF-adjacent] on the worst case | **Probe P7 ran.** For plain ASCII the ratio is ≈**1.01**, not 2.2: a 102,468-byte request was rejected as "101 KB" and a 133,188-byte one as "131 KB", so internal ≈ wire + ~1 KB. The 2.2 is **kept deliberately** — the 2.0 ratio in the forum report was presumably rich text, which the community explanation attributes to formatted content being stored as JSON, and that case is still unmeasured. ASCII is the floor, not the number to size for |
 | `MAX_ROW_JSON_BYTES` | `38_000` (38 KB) | [CHOSEN — no evidence, tune later] | 38 KB × 2.2 ≈ 84 KB internal, under the published 85 KB row ceiling |
 | `MAX_ROWS_PER_UPSERT` | `100` soft, `250` hard | [CHOSEN — no evidence, tune later] | **No published limit exists.** A user reports "several hundred rows" in one call working in production. The byte cap binds first for fat rows |
 | `MAX_ROW_IDS_PER_DELETE` | `500` | [CHOSEN — no evidence, tune later] | Row IDs are ~12 bytes; the byte cap never binds. Larger batches consume fewer doc-content-write tokens |
@@ -153,6 +153,17 @@ Reject an oversized single row **before** sending it. The server's error does no
 identify which row in the batch was at fault.
 
 ## 1.3 Asynchronous mutation polling
+
+**Row writes are slower to complete than page-content writes** [observed
+2026-09-04]. A single-row `upsertRows` carrying a fifteen-character value reported
+`completed:false` on every poll until between t=21.9 s and t=23.0 s. A six-row
+`deleteRows` on the same table completed in about twelve seconds. Probe P4's
+16–18 s figure was a page-content append, so the row path is the slower of the two,
+not a proxy for it — any budget reasoning that assumed otherwise is optimistic.
+Note also that the status body was `{"completed":false}` with **no `warning` key at
+all**, where P4 recorded `{"completed": false, "warning": null}`; a client must
+treat the field as absent rather than null.
+
 
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
@@ -410,10 +421,42 @@ distinguishable from each other, but a size refusal is separable from a plain
 on. This was tested because a client that must react to a size refusal needs a
 discriminator, and a field would have been far more durable than a substring.
 
-**Still unmeasured on the row side.** The above is the *request* ceiling (2 MB).
-The *row* ceiling's message — `"Row edit of size 87 KB exceeds maximum size of
-85 KB."` — remains a forum paste only; whether it carries `codaType` has never been
-observed, because provoking it needs a table row and probe P7 has not run.
+**The row ceiling behaves the same way** [observed 2026-09-04, probe P7]. Provoked
+against a real table row, complete and verbatim:
+
+```json
+{"statusCode":400,"statusMessage":"Bad Request","message":"Row edit of size 131 KB exceeds maximum size of 85 KB."}
+```
+
+Same bare shape, no `codaType`, no `codaDetail`. So **both** message patterns a
+client would match on — `entity too large` for the request ceiling and
+`exceeds maximum size` for the row ceiling — are now first-party observations, and
+neither carries anything structured to key off instead.
+
+**A batch refusal does not say which row was at fault** [observed 2026-09-04]. An
+`upsertRows` carrying three rows, the middle one oversized, was refused with a
+message byte-identical in form to the single-row case: it names the offending row's
+*size* and nothing else — no index, no position, no identifier. This settles the
+question the §1.2 note asserted without a citation, and it settles it the same way:
+a client that must locate the bad row in a batch has to subdivide and resend,
+because the API will not tell it.
+
+The size figure is a partial handle — a caller that knows its own rows' sizes can
+sometimes match `131 KB` back to one of them — but only when the sizes are distinct
+and only under a known inflation ratio, which the entry above shows is not known for
+rich text. It is not a substitute for subdividing.
+
+**A refused request applies nothing** [observed 2026-09-04]. In the same three-row
+test the two valid rows did **not** land: a read-back after the mutation window
+showed neither present. So an `upsertRows` call is all-or-nothing when it is
+rejected at validation time, which is the case a chunking client depends on. This
+says nothing about a failure *after* a 202, which the API has no way to report at
+all.
+
+**`upsertRows` returns the ids it assigned** [SPEC-adjacent, observed 2026-09-04].
+The 202 body is `{"requestId": ..., "addedRowIds": [...]}`, so a newly inserted row
+is not anonymous — the caller gets its id back immediately, in request order, before
+the mutation completes.
 
 **No maximum rows per upsert has ever been published.** [SPEC-VERIFIED] The entire
 spec contains **zero** `maxItems`, and no `maxLength` on any docs-domain schema —
