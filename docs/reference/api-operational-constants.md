@@ -422,7 +422,7 @@ formula-calculation limit above which calculations are disabled. Doc size is not
 readable through the API — if a doc produces persistent 4xx/timeouts across
 multiple endpoints, surface this message so the user can check the Statistics panel.
 
-## 2.4 Sync tokens — recommendation: **do not ship in v1**
+## 2.4 Sync tokens — the least-exercised surface in the API
 
 **`syncToken` is the least-exercised surface in the API.** [SPEC-VERIFIED plus
 exhaustive negative search]
@@ -501,12 +501,16 @@ And earlier, Oleg Vaskevich (Coda), 2019-10-31,
 > table (**fetch all the rows and look where the modified date is greater than the
 > last fetch date**), or use Zapier"
 
-**Recommended v1 posture.** Do not expose `sync_token` on any tool. If
-`nextSyncToken` appears in a response, ignore it for control flow and do not surface
-it to the model as a usable handle. Offer the staff-recommended alternative instead:
-`listRows` with `query` for filtering, `updatedAt` for coarse change detection with
-the calculated-value caveat stated **in the tool description**, and client-side
-content hashing where exactness matters.
+**No RFC decides sync tokens.** The facts above point clearly at leaving them
+alone in a first version, and this file previously stated that as a recommended
+posture — which is a choice, and choices do not belong here. It is recorded
+instead as an **open decision with no owner**: nothing in `_rfc/` currently says
+whether `sync_token` is exposed on any tool, whether `nextSyncToken` is ignored
+for control flow, or whether the alternatives staff suggest (`listRows` with
+`query`, `updatedAt` for coarse change detection, client-side content hashing)
+are adopted in its place. The tool surface as decided contains no sync-token
+tool, so the question is currently moot in practice and would become live again
+only if one were proposed.
 
 The reasons, in order of weight: you cannot tell a caller whether a delta is
 complete, because deletion reporting is structurally impossible; you cannot detect
@@ -850,6 +854,30 @@ a page is therefore a first-class operation with its own endpoint, **not** a
 whole-page `replace` carrying an empty payload. The same endpoint also deletes
 named elements by ID, which is a narrower destructive primitive than a
 whole-page write.
+
+**Content format enums** [SPEC-VERIFIED, 2026-09-04]. Three distinct enums, and
+conflating them is easy:
+
+- `PageContentFormat` — `["html", "markdown"]`, *"Supported content types for
+  page (canvas) content."* This is the **write** side: the format field on the
+  content a page is created or updated with. Both members are legal on write.
+- `PageContentOutputFormat` — `["html", "markdown"]`, the formats an **export**
+  may be requested in.
+- `PageContentItemContentFormat` — `["plainText"]`, one member only. This is the
+  **synchronous** `listPageContent` read, which is why markdown cannot be read
+  back without the asynchronous export.
+
+**202 responses that carry no `requestId`** [SPEC-VERIFIED, 2026-09-04]. Fourteen
+operations answer 202. Eleven return a schema carrying `requestId` and are
+therefore pollable through `/mutationStatus/{requestId}`: `createPage`,
+`updatePage`, `deletePage`, `deletePageContent`, `upsertRows`, `deleteRows`,
+`updateRow`, `deleteRow`, `pushButton`, `publishDoc`, `triggerWebhookAutomation`.
+
+Three do **not**: `addCustomDocDomain`, `deleteDoc`, and — the one that matters
+here — `beginPageContentExport`, whose 202 returns an export id polled at
+`GET .../export/{requestId}` instead. A blanket "if 202 then poll
+`getMutationStatus`" rule would therefore break on the export kickoff, which is
+the single most-used write in a read path.
 
 The page write surface in full: `POST /docs/{docId}/pages` (create),
 `PUT /docs/{docId}/pages/{pageIdOrName}` (`updatePage`, which carries

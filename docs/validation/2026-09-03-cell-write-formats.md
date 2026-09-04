@@ -3,6 +3,10 @@
 Evidence document. Last updated 2026-09-03. Updatable — extend it as tests are run
 and as vendor behaviour changes. Cite it from an RFC; do not paste it into one.
 
+**Status:** the desk research in the sections below is complete and sourced. The
+**test plan at the end has NOT been run** — its Results section is an empty
+template. An empty Results section here means untested, never tested-and-clean.
+
 ## What this document settles
 
 Reading rows with `valueFormat=rich` returns JSON-LD objects (`StructuredValue` for

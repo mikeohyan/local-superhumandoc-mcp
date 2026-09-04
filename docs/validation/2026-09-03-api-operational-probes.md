@@ -406,8 +406,8 @@ done
 posts, zero staff statements, zero public consumers, and description text unchanged
 since 2022. The `Row` schema has no tombstone field and is
 `additionalProperties: false`, so deletions appear structurally impossible to
-express. The current recommendation is not to ship sync tokens in v1. **Run this
-only if that recommendation is being reconsidered.**
+express. No RFC decides whether sync tokens ship, and the tool surface as decided
+contains no sync-token tool. **Run this only if one is proposed.**
 
 **Cost.** 3 reads + 1 delete + a 60 s wait. ~2 minutes.
 

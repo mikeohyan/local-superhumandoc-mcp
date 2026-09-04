@@ -93,13 +93,24 @@ Confidence markers: **[S]** confirmed by Coda/Superhuman staff or first-party do
 3. **Failures are silent.** Writes return **202 + requestId**; malformed content surfaces only as `MutationStatus.warning` on a *separate* `GET /mutationStatus/{requestId}` call that no open-source implementation makes.
 4. **Instability compounds.** If export normalizes (`*`->`-`, renumbered lists, reflowed indentation), every RMW cycle rewrites lines the agent never touched — spurious diffs, broken text anchors, decayed content.
 
-**Recommendations for the tool surface:**
+**What the tool surface did with this.** The findings above were written before
+any tool surface existed and originally read as recommendations. They have since
+been decided by the `tool-surface` topic (see `_rfc/README.md`), so they are
+recorded here as the evidence trail rather than as choices this file makes:
 
-- `read_page` must declare in its own description that markdown is a **lossy projection**: images, tables, buttons, controls, callouts and dividers may be missing or flattened; it is not the document.
-- `edit_page` should default to `append`/`prepend`, and prefer `elementId`-scoped `replace` (IDs from `GET /docs/{docId}/pages/{p}/content`).
-- Whole-page `replace` should be a **separate, explicitly-named destructive tool** (e.g. `overwrite_page`) requiring an explicit confirm flag.
-- **Implement a guard** before any page-scoped `replace`: call `GET /docs/{docId}/tables`, `/controls`, `/formulas` and filter on `parent.id == pageId` (all three schemas carry `parent: PageReference`). If any hit, refuse or loudly warn with object names.
-- Always poll `GET /mutationStatus/{requestId}` after a write and surface `warning` verbatim to the model.
+- The page-markdown read declares its own lossiness in its tool description —
+  images, tables, buttons, controls, callouts and dividers may be missing or
+  flattened, and it is not the document.
+- Editing is element-scoped and anchored on IDs obtained from the synchronous
+  page-content read; additive editing is a separate tool from replacement.
+- Whole-page replacement is a separate, explicitly named destructive tool, gated
+  behind an environment flag and additionally requiring an explicit force
+  parameter.
+- A pre-write guard lists the document's tables, controls and formulas filtered
+  on `parent.id == pageId` — all three schemas carry `parent: PageReference` —
+  and refuses, naming what it found.
+- Every write polls `GET /mutationStatus/{requestId}` and surfaces `warning`
+  verbatim.
 
 ---
 
