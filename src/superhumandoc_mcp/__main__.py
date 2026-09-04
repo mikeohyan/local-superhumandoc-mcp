@@ -1,11 +1,16 @@
 """Console-script entry point."""
 
 import argparse
+import asyncio
 import os
 import sys
 from pathlib import Path
 
-from superhumandoc_mcp.config import ConfigError, format_startup_line, load_config
+from superhumandoc_mcp.client import DocsClient, TokenIdentity
+from superhumandoc_mcp.config import (
+    Config, ConfigError, format_startup_line, load_config,
+)
+from superhumandoc_mcp.errors import AuthFailure, ClientError
 from superhumandoc_mcp.server import build_server
 
 
@@ -21,8 +26,34 @@ def main() -> None:
         print(f"superhumandoc-mcp: {error}", file=sys.stderr)
         raise SystemExit(2) from error
 
-    print(format_startup_line(config), file=sys.stderr)
+    identity = asyncio.run(_identify(config))
+    print(format_startup_line(config, identity), file=sys.stderr)
     build_server(config).run("stdio")
+
+
+async def _identify(
+    config: Config, client: DocsClient | None = None
+) -> TokenIdentity | None:
+    """A 401 stops the server: the token is not valid and every tool would
+    fail. Anything else starts it. A 403 in particular is what a token teaches
+    per call, not a verdict on the token, so it is reported rather than fatal,
+    and so is a timeout, a 5xx or a 429 — the line then says scope is unknown.
+
+    `client` is injectable so this asymmetry can be exercised against a mock
+    transport rather than the network.
+    """
+    client = client or DocsClient(config)
+    try:
+        return await client.whoami()
+    except AuthFailure as error:
+        if error.status == 401:
+            print(f"superhumandoc-mcp: {error}", file=sys.stderr)
+            raise SystemExit(2) from error
+        return None
+    except ClientError:
+        return None
+    finally:
+        await client.aclose()
 
 
 if __name__ == "__main__":

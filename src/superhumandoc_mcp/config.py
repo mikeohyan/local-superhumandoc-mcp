@@ -8,8 +8,14 @@ the `config-resolution` topic; see `_rfc/README.md`.
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import dotenv_values
+
+if TYPE_CHECKING:
+    # Type-checking only: the client imports Config from here, so importing it
+    # back at runtime would be a cycle.
+    from superhumandoc_mcp.client import TokenIdentity
 
 _AFFIRMATIVE = frozenset({"1", "true", "yes", "on"})
 _PREFIX = "SHDOC_"
@@ -159,7 +165,9 @@ def load_config(
     )
 
 
-def format_startup_line(config: Config) -> str:
+def format_startup_line(
+    config: Config, identity: "TokenIdentity | None" = None
+) -> str:
     """One line to stderr at startup.
 
     Every failure mode in resolution is otherwise silent — the wrong file loads,
@@ -167,14 +175,18 @@ def format_startup_line(config: Config) -> str:
     calls later. This line turns that mystery into an observation. It must never
     carry the token.
 
-    Seam: the `config-resolution` topic also specifies a token name and a
-    `scoped` flag on this line. Both come from a `whoami` call, which needs an
-    HTTP client this wave does not build — that lands with the `upstream-api`
-    topic. Deliberately not implemented here.
+    `identity` is None whenever `whoami` could not establish one, which the
+    `failure-policy` topic makes a normal startup rather than a failure: the
+    line then says the scope is unknown and the server serves anyway.
     """
     sources = " ".join(f"{key}={origin}" for key, origin in sorted(config.sources.items()))
     state = "ON" if config.allow_destructive else "off"
+    if identity is None:
+        token = "token: scope unknown"
+    else:
+        scope = "scoped" if identity.scoped else "unscoped"
+        token = f"token: {identity.name or 'unnamed'} ({scope})"
     return (
         f"superhumandoc-mcp: env={config.env_file} doc={config.doc_id} "
-        f"destructive tools: {state} [{sources}]"
+        f"{token} destructive tools: {state} [{sources}]"
     )

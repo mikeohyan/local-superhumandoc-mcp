@@ -10,6 +10,7 @@ import asyncio
 import random
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 import httpx2
 
@@ -19,7 +20,7 @@ from superhumandoc_mcp.config import Config
 from superhumandoc_mcp.deadline import Deadline
 from superhumandoc_mcp.errors import (
     AuthFailure, ClientError, FailureClass, NotTransmitted, OutcomeUnknown,
-    RateLimited, Replay, StickyRateLimit, UpstreamRefused,
+    RateLimited, Replay, ResponseUnusable, StickyRateLimit, UpstreamRefused,
 )
 from superhumandoc_mcp.throttle import Bucket, Throttle
 
@@ -35,6 +36,17 @@ _MAX_429_RETRIES_WRITE = 4
 _STICKY_429_THRESHOLD = 3
 _STICKY_429_WINDOW_S = 120.0
 _REPLAYS_PER_REQUEST = 1
+_WHOAMI_TIMEOUT = httpx2.Timeout(10.0, connect=5.0)
+
+
+@dataclass(frozen=True)
+class TokenIdentity:
+    """What `whoami` can establish. `scoped` says WHETHER the token is
+    restricted, never what the restriction covers — that is only learnable by
+    making a call and reading a 403."""
+
+    name: str | None
+    scoped: bool | None
 
 
 class DocsClient:
@@ -66,6 +78,42 @@ class DocsClient:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+    async def whoami(self) -> TokenIdentity:
+        """Never retried, on its own short ceiling.
+
+        The ceiling lives in the read timeout because a call with no replays
+        has no retry checkpoint for a deadline to act at. Not retrying also
+        matters operationally: a supervisor restarting a crash-looping server
+        must not be able to amplify one bad launch into repeated calls on a
+        bucket shared with every other client using this token.
+
+        Every failure leaves here as a typed failure, including a transport
+        one, because startup has to survive having no network at all.
+        """
+        try:
+            response = await self._http.request(
+                "GET", "/whoami", timeout=_WHOAMI_TIMEOUT
+            )
+        except Exception as exc:  # noqa: BLE001 - classified below
+            if classify_exception(exc) is FailureClass.REFUSED:
+                raise NotTransmitted("whoami") from exc
+            raise OutcomeUnknown("whoami") from exc
+
+        failure = classify_status(response.status_code)
+        if failure is FailureClass.AUTH:
+            raise AuthFailure("whoami", response.status_code)
+        if failure is not None:
+            raise UpstreamRefused("whoami", response.status_code)
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise ResponseUnusable("whoami") from exc
+        if not isinstance(body, dict):
+            raise ResponseUnusable("whoami")
+        return TokenIdentity(
+            name=body.get("tokenName"), scoped=body.get("scoped")
+        )
 
     async def request(
         self,
