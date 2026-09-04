@@ -860,6 +860,23 @@ whole-page `replace` carrying an empty payload. The same endpoint also deletes
 named elements by ID, which is a narrower destructive primitive than a
 whole-page write.
 
+**What `whoami` reveals about a token** [SPEC-VERIFIED and live-confirmed,
+2026-09-04]. `GET /whoami` returns a `User` whose properties are `href`,
+`loginId`, `name`, `pictureLink`, `scoped`, `tokenName`, `type`, `workspace`.
+Two matter for configuration:
+
+- `scoped` — boolean, *"True if the token used to make this request has
+  restricted/scoped access to the API."*
+- `tokenName` — the name given to the token at creation.
+
+Confirmed live on 2026-09-04 with this project's own document-scoped token:
+`scoped: true`, `tokenName: "MCP Validator"`. The boolean says only *that* the
+token is restricted — nothing reports which document or which operations, and
+there is no endpoint anywhere in the surface for creating or reading token
+restrictions (no path matches `token`, `apikey`, `credential` or `scope`). So
+the extent of a restriction is discoverable only by making a call and reading a
+403.
+
 **Content format enums** [SPEC-VERIFIED, 2026-09-04]. Three distinct enums, and
 conflating them is easy:
 

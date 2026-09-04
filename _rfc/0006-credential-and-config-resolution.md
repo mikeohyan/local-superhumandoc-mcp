@@ -220,10 +220,19 @@ which is a strictly worse position for no benefit.
 Two properties of token restrictions must be stated because both produce
 confusing failures:
 
-- Restrictions are set in the provider's UI at creation time. There is no API to
-  create or introspect them, and `whoami` does not report scope. A server cannot
-  discover at runtime what its token may do — only by making a call and reading a
-  403.
+- Restrictions are set in the provider's UI at creation time, and there is no API
+  to create or modify them. `whoami` reports **whether** a token is restricted —
+  it returns a boolean `scoped`, alongside the token's `tokenName` — but never
+  **what** the restriction is: not which document, not which operations. So the
+  server can establish at startup that its token is scoped, and can name it, but
+  still learns what the token may actually do only by making a call and reading a
+  403. Both facts are spec-declared and were confirmed against a live token; see
+  `docs/reference/api-operational-constants.md`.
+
+  The startup line therefore carries the token's name and whether it is scoped,
+  next to the resolved `.env` path. An unscoped token in a project that expects a
+  document-scoped one is a real misconfiguration, and this is the one cheap place
+  it becomes visible before a tool call fails.
 - Operation restrictions map `GET` to read access and `POST`, `PUT`, `DELETE` to
   write access. **Reading a page's content as markdown requires a `POST`** to
   begin an export. A token restricted to read access therefore cannot read page
