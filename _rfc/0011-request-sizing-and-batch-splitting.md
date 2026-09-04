@@ -78,8 +78,8 @@ and `PageContent.content` carry no length constraint at all. The only datum in
 either direction is a user describing *"a single write request … which updates
 several hundred rows"* working in production. A third-party client asserts a
 "500 rows per request" limit; `docs/validation/2026-09-03-cell-write-formats.md`
-records that no vendor source supports it, and it is one of two unsourced claims
-that put that client on the do-not-cite list.
+records that no vendor source supports it; it is one of two claims that put that
+client on the do-not-cite list, the other being one staff contradict outright.
 
 **A split write cannot be undone** [SPEC-VERIFIED]. The API has no transaction,
 no rollback and no way to group writes: the only paths matching `batch` belong to
@@ -155,14 +155,18 @@ and deferred the rest to this wave. Ten rules follow.
    model, which RFC 0004 says this server exists to absorb, and which RFC 0004
    already applies to pagination for the same reason.
 
-2. **Page-content writes are refused above the cap, never split.** Rows and row
-   IDs are a set whose members carry identity, so a chunked batch can say which
-   rows landed and which did not. Prose has no such handle. Markdown *could* be
-   split at block boundaries — the claim is not that it is indivisible — but a
-   half-written page cannot be described to the caller in the way a half-written
-   row set can, and RFC 0005's write tools have no vocabulary for "resume from
-   here". On top of that, `overwrite_page` and `replace_element` carry a replace
-   semantic, where two calls leave only the second one's content. So
+2. **Page-content writes are refused above the cap, never split.** The caller of
+   `upsert_rows` has already partitioned their input: rule 6 can report by
+   position because the positions are the caller's own. The caller of
+   `append_to_page` passes one string, so the client would have to invent the
+   partition and then report progress against boundaries the caller never chose
+   and cannot address — RFC 0005's write tools have no vocabulary for "resume
+   from the third block". Markdown *could* be split at block boundaries; the
+   claim is not that it is indivisible, but that a report about an invented
+   partition is not something a caller can act on. Separately, `overwrite_page`
+   and `replace_element` carry a replace semantic, where two calls leave only
+   the second one's content, so for them splitting is not merely unreportable
+   but wrong. So
    `create_page`, `append_to_page`, `replace_element` and `overwrite_page`
    reject a body above `MAX_PAGE_CONTENT_BYTES` before sending it, and say both
    the limit and how far over the body went. `replace_element` shares that cap
@@ -193,7 +197,11 @@ and deferred the rest to this wave. Ten rules follow.
    since the observed error names a size and not a row. Its refusal ends that
    branch and nothing else: the remaining chunks are still attempted.
    `update_row` is the degenerate case of all this, a chunk of one row with no
-   halving to do, and it reports a size refusal the same way.
+   halving to do, and it reports a size refusal the same way. Note what rule 3
+   leaves for this rule to do: any row the estimate flags is already alone in
+   its chunk, so a chunk that reaches the halving contains no row the estimate
+   thought was too big. The case this handles is the estimate being wrong,
+   which is the case it was written for.
 
 5. **Re-chunking is not a replay, and RFC 0010's replay budget is untouched.**
    Rule 4 there permits at most one replay *per request*; a halved chunk is a
@@ -205,9 +213,11 @@ and deferred the rest to this wave. Ten rules follow.
    Four outcomes, not three: *applied* in RFC 0005's sense, *unknown* in RFC
    0010's, *refused* for a row the API answered with a size refusal, and *not
    attempted* — a state this RFC adds, for rows the deadline was reached before
-   reaching. *Refused* is deliberately not folded into *unknown*: RFC 0010 built
-   a separate class for an answered refusal precisely because its outcome is
-   known, and a report that calls it unknown throws that away. Outcomes are
+   reaching. *Refused* is deliberately not folded into *unknown*. RFC 0010's
+   class table already separates a definite server answer from a transmitted
+   request whose fate is open; this rule carries that same distinction down to
+   the row, because a report that calls a definite refusal unknown throws away
+   the one thing the caller could have acted on. Outcomes are
    reported per row and keyed by the row's position in the caller's input,
    because a new row in an unkeyed upsert has no identifier of its own until the
    API assigns one; `delete_rows` also carries the row ID, which it always has.
@@ -223,9 +233,14 @@ and deferred the rest to this wave. Ten rules follow.
    rule 10, using the same `Deadline.can_afford` that RFC 0010 already applies
    to its replay delay and its throttle wait. Rows in chunks never started are
    reported *not attempted*. A chunk that is started and whose poll then reaches
-   the deadline reports *unknown*, per RFC 0010. The check must also fire before
-   the throttle's own refusal would: the throttle raises rather than reporting,
-   so a tool that lets it decide loses the partial account rule 6 exists to give.
+   the deadline reports *unknown*, per RFC 0010. This check cannot pre-empt the
+   throttle's own refusal and does not try to: the wait a full bucket imposes
+   depends on bucket state the tool layer cannot see, so a chunk can pass this
+   check and still be refused a slot. The throttle raises rather than reporting,
+   so the tool catches that refusal and folds the rows it covers into *not
+   attempted* rather than letting it escape — losing the whole account of a
+   batch because its last chunk could not get a slot is the failure rule 6
+   exists to prevent.
 
 8. **Reads request a page size and never trust the count returned.**
    `nextPageToken` is the sole continuation authority; a short page is not
@@ -233,15 +248,18 @@ and deferred the rest to this wave. Ten rules follow.
    published constraint rather than choosing anything, and it is written down
    because the natural implementation gets it wrong.
 
-9. **A 504 from a listing restarts that listing at half the page size, down to
-   a floor.** Restarting is not a preference: a `pageToken` ignores every
+9. **A 504 from `find_rows` restarts that listing at half the page size, down
+   to a floor.** Restarting is not a preference: a `pageToken` ignores every
    parameter sent beside it, so a smaller `limit` cannot take effect part-way
    through. Each attempt is a fresh request rather than a replay. Halving is of
    the size the failing attempt used, rounded down, never below
    `LIST_PAGE_SIZE_FLOOR`; the floor size is itself attempted once, and only if
-   that attempt also fails does the tool surface the failure. Rows already
-   delivered from an abandoned pass are discarded rather than merged, because
-   nothing establishes that two passes enumerate a table in the same order. When
+   that attempt also fails does the tool surface the failure. Rows from a pass a
+   504 ended are discarded rather than merged into the next, because nothing
+   establishes that two passes enumerate a table in the same order. Rows from
+   the final pass — the one the deadline rather than a 504 cut short — are kept
+   and reported: no response distrusted them, and discarding them would make
+   "say how far it got" mean nothing after three attempts. When
    the **deadline** rather than the floor ends the ladder, the tool says so and
    says how far it got, rather than returning a short result that would read as
    the whole table — RFC 0005 has `find_rows` page "up to the caller's cap", and
@@ -288,10 +306,15 @@ and deferred the rest to this wave. Ten rules follow.
    `ROW_INFLATION_FACTOR` is the weakest entry and the one rule 4 is built to
    tolerate: its error costs a wasted round trip, never a wrong answer.
 
-**Not decided here.** The 125 MB document ceiling, past which the vendor says
-the API is not supported, is a property of the document rather than of a
-request. Rule 9 surfaces it as a hypothesis; nothing here tries to detect or
-manage it.
+**Not decided here.** Two things. The 125 MB document ceiling, past which the
+vendor says the API is not supported, is a property of the document rather than
+of a request; rule 9 surfaces it as a hypothesis and nothing here tries to
+detect or manage it. And rule 9 is scoped to `find_rows` because that is the
+endpoint the 504 evidence is about. `get_doc_overview` and `describe_table` also
+page — `listPages`, `listTables`, `listColumns` — and could presumably 504 on a
+large enough document, but nothing has been observed there, their natural page
+sizes are not the row page size, and inventing a ladder for them from one
+endpoint's evidence is the kind of extrapolation this RFC is trying to stop.
 
 ## Alternatives considered
 
@@ -402,15 +425,18 @@ recording only what is true of the API.
 rather than one result for the call, and its description must explain them —
 more surface for a model to misread than a single success value. Chunking makes a partly-applied
 document a routine outcome instead of an exceptional one, with no rollback to
-offer. Rule 4's recursion is logarithmic only when one bad row is
-being hunted inside a sound batch; when many rows are individually oversized both
-halves are refused and the recursion walks a full binary tree, approaching two
-requests per row. What actually stops that is arithmetic rather than a rule: row
-writes draw on the doc-content bucket, the tightest in the API at two per ten
-seconds, so a ninety-second tool call affords roughly eighteen of them and rule 7
-cuts the recursion off long before the tree is explored. The honest description
-is that a pathological batch spends its whole deadline discovering a few
-oversized rows and reports most of itself *not attempted*. Rule 9 is worse: a 504 late in a large listing
+offer. Rule 3's isolation is what keeps rule 4 cheap, and the cost
+lands somewhere other than the recursion. A batch where many rows are
+individually oversized never reaches the halving at all: each such row is already
+alone in its chunk, so it costs one round trip, not a binary-tree search. Rule 4's
+recursion is reserved for the case the estimate got wrong, which is rarer and
+genuinely logarithmic in the chunk. What binds either case is arithmetic rather
+than a rule. Row writes draw on the doc-content bucket, the tightest in the API at
+two per ten seconds, and the deadline leaves eighty seconds after its reserved
+tail, so a tool call affords about sixteen of them however they are spent. The
+honest description of a pathological batch is that it spends its whole deadline
+discovering oversized rows one at a time and reports most of itself *not
+attempted* — slow and truthful rather than fast and wrong. Rule 9 is worse: a 504 late in a large listing
 discards everything paged so far, because the token cannot carry a new page
 size, so the cost of shrinking grows with how far the listing got.
 
