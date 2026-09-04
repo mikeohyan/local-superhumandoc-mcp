@@ -329,7 +329,8 @@ does not require it), but the registration pattern is identical to what
 `MCPServer.tool()` (checked its signature) takes a request-time argument or
 defers registration — it registers immediately against `self._tool_manager`
 when the decorator runs. This supports build-time, configuration-gated tool
-registration (the mechanism RFC 0005's destructive-tool gating depends on)
+registration (the mechanism the `tool-surface` topic's destructive-tool
+gating depends on; see `_rfc/README.md`)
 with no dynamic, per-request behavior involved.
 
 ---

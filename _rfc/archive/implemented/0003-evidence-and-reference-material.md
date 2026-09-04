@@ -1,13 +1,13 @@
 ---
 rfc: 0003
 title: Keep empirical evidence and reference material in docs/, separate from decisions in _rfc/
-status: Proposed
+status: Implemented
 created: 2026-09-03
-decided:
+decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: evidence-location
-commits: []
+commits: [3655b5578c264d1d1bc9323a80686c3044191cc4, 4e7ce9403ec081793f20334c5b7da1ad0ecf1b81, df68d18713243639ae544e882f6c409d3c3caa56]
 tags: [process, documentation]
 ---
 
@@ -133,4 +133,37 @@ now.
 
 ## Implementation notes
 
-Left empty at Proposed.
+Shipped in three commits. `3655b55` created `docs/reference/` and
+`docs/validation/` and landed the four evidence files the Decision was written
+around; it also added this RFC, because the material existed before the
+convention that houses it did. `4e7ce94` gave `CLAUDE.md` and `README.md` the
+sections naming both directories, which Consequences identifies as the
+mitigation the whole split depends on. `df68d18` corrected that edit — the new
+`docs/` heading had been inserted between the `_rfc/` section's prose and its
+"Rules that apply to every session" list, silently reparenting five
+RFC-specific rules under the wrong subject.
+
+Proposed straight to Implemented, as RFC 0009 was, because the structure was in
+place before the decision was accepted.
+
+**The failure mode this RFC names happened within a day, and naming it is what
+caught it.** Consequences warns that the thing to watch for is "a `docs/`
+reference file that quietly grows a rationale section and becomes a shadow
+RFC". `docs/reference/mcp-client-environment.md` arrived carrying a section
+titled "Recommendation" that ranked options, issued imperatives — "do not rely
+on", "do not recommend" — and cited an RFC by number. Commit `19f35ae` restated
+it as what each `.env` resolution candidate does under a subdirectory launch,
+with the design call handed explicitly to an RFC. No information was lost in the
+conversion, which is the useful part: the boundary cost phrasing and nothing
+else.
+
+Two properties held up better than the Consequences section expected. Evidence
+files accumulated across several sessions without any RFC needing to be
+superseded, which is what the split was for. And
+`docs/validation/2026-09-03-api-operational-probes.md` had its Results section
+filled in by a later session against a live API — the case that could not have
+worked inside a frozen body, and the one that motivated the RFC.
+
+Nothing in the Decision was left unimplemented. Both deferrals stand: there is
+still no index for `docs/`, and no pruning rule for evidence superseded by a
+later finding.
