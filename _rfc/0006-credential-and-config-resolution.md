@@ -1,9 +1,9 @@
 ---
 rfc: 0006
 title: Resolve credentials and document scope from a project-local .env inside the server
-status: Proposed
+status: Accepted
 created: 2026-09-03
-decided:
+decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: config-resolution
