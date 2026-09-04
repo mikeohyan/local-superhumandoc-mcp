@@ -335,6 +335,34 @@ with no dynamic, per-request behavior involved.
 
 ---
 
+## 11. The stdio client transport — a real subprocess, not the in-process client
+
+**[PACKAGE-VERIFIED] + [SMOKE-TESTED], 2026-09-04.**
+
+Section 6 covers `mcp.Client(server)`, which is backed by
+`mcp/client/_memory.py`'s `InMemoryTransport` and never spawns a process. That
+is not the transport a real client uses. The stdio client path is separate and
+is **not** reachable from `mcp.Client`:
+
+- `mcp.client.stdio.StdioServerParameters(*, command: str, args: list[str] = [], env=None, cwd=None, ...)`
+- `mcp.client.stdio.stdio_client(server: StdioServerParameters, errlog=...)` —
+  an async generator yielding `(read_stream, write_stream)`. It spawns a genuine
+  child process using `anyio`'s process machinery.
+- `mcp.client.session.ClientSession(read_stream, write_stream, ...)`, also
+  exported as top-level `mcp.ClientSession`, carrying `initialize()`,
+  `list_tools()` and `call_tool(name, arguments)`.
+
+Server-side, transport selection happens at `run()` time —
+`server.run("stdio")` — and there is no transport parameter on
+`MCPServer.__init__` for it to have gone on instead, consistent with §4.
+
+Driven end to end against a built wheel invoked through `uvx`, `initialize()`
+returned the server's declared name, `list_tools()` listed the registered tool,
+and `call_tool()` returned both `content` (text `"9"`) and `structured_content`
+(`{'result': 9}`) with `is_error=False`. The full transcript, including the
+scratch server and client scripts, is at
+`docs/validation/2026-09-04-packaging-build-validation.md` under B8.
+
 ## Summary of discrepancies from the packaging topic's text
 
 Everything in the packaging topic's Context and Decision sections about SDK

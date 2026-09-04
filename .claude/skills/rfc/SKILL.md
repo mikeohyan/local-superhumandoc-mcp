@@ -191,14 +191,19 @@ grep -L '^topic:' _rfc/[0-9]*.md _rfc/archive/*/[0-9]*.md
 # only they are excluded; nothing under docs/ is exempt. Silence is success.
 # The (\./)? is load-bearing: GNU grep -r prefixes every path with ./ and the
 # filter is a silent no-op without it.
+# --exclude-dir=worktrees is load-bearing too, and fails the opposite way: an
+# agent worktree under .claude/worktrees/ is a whole second checkout, so without
+# it the audit reports every RFC in that copy as a violation and buries the real
+# hits. Excluding .claude wholesale would be wrong: .claude/skills/ is a
+# living document set the audit must still cover.
 # _rfc/plans/ is excluded for the same reason as the index: a plan is named
 # after the one RFC it implements and dies with it.
-grep -rn --exclude-dir=.git -E 'RFC[- ]?[0-9]{4}' . \
+grep -rn --exclude-dir=.git --exclude-dir=worktrees -E 'RFC[- ]?[0-9]{4}' . \
   | grep -vE '^(\./)?_rfc/([0-9]|archive/|plans/)'
 
 # No living document cites an RFC by path either — the `rfc-process` topic
 # forbids it, since a path changes when the RFC is archived.
-grep -rn --exclude-dir=.git -E '_rfc/(archive/[a-z]+/)?[0-9]{4}-' . \
+grep -rn --exclude-dir=.git --exclude-dir=worktrees -E '_rfc/(archive/[a-z]+/)?[0-9]{4}-' . \
   | grep -vE '^(\./)?_rfc/(README|[0-9]|archive/)'
 
 # No RFC still carries the template's placeholder topic.

@@ -85,9 +85,14 @@ this project.
 console-script name are both `superhumandoc-mcp`, and keeping them identical is
 load-bearing rather than tidy: the final argument to `uvx` is the **script**
 name, and a mismatch produces `An executable named X is not provided by package
-Y`. The `[tool.hatch.build.targets.wheel] packages` line is required with a
-`src/` layout — without it hatchling cannot locate the package and builds an
-empty wheel.
+Y`. The `[tool.hatch.build.targets.wheel] packages` line is stated explicitly
+but is not, on current hatchling, required: with the line omitted, hatchling
+1.32.0 auto-discovers `src/superhumandoc_mcp` from the normalized distribution
+name and builds a correct wheel. It is kept because the auto-discovery holds
+only while the package directory matches that normalized name, and because an
+explicit line costs nothing and survives a rename that would otherwise fail
+silently. Every claim in this section was executed rather than reasoned; the
+raw output is at `docs/validation/2026-09-04-packaging-build-validation.md`.
 
 ```toml
 [project]
