@@ -1,13 +1,13 @@
 ---
 rfc: 0008
 title: Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory
-status: Accepted
+status: Implemented
 created: 2026-09-03
 decided: 2026-09-04
 supersedes: 0002
 superseded_by:
 topic: upstream-api
-commits: []
+commits: [567be1c6f083f659c33942a813cc3a008a3b8925, facd027b280cc26d0dadefd256f89b121804245b, 4f80c977af1beaa8c66b89e236fb845a02969db3, 56823d5f3b450a0cce6d42b5316181edbcc5174b, 026140e38ba3893bf5dd1f7c4f386c2fbfe9e1c0]
 tags: [api, dependencies, superhuman-docs, rate-limiting]
 ---
 
@@ -244,4 +244,33 @@ rather than the number.
 
 ## Implementation notes
 
-Left empty at Proposed.
+The client-facing rules shipped with the HTTP client. Rule 1's four operating
+values are the throttle's buckets. Rule 2's framing — that a 429 is expected
+rather than exceptional, because the buckets are shared beyond this process —
+is the text the rate-limit error carries to the model, including that batching
+is the remedy. Rule 3's 429 handling is in the client's request chokepoint:
+replayed on any method because refusal precedes execution, backed off with the
+equal-jitter formula, `Retry-After` parsed opportunistically and clamped when
+present, and surfaced rather than waited out when the budget or the deadline is
+spent. Nothing parses `Retry-After` for us, so that parser is hand-written
+against stdlib for both the seconds and the HTTP-date form.
+
+**Rule 4 is not discharged by this wave, and this RFC moves to Implemented
+without it.** Spec-fingerprint drift detection is a thing someone does
+periodically, not code this client runs: the fingerprint is compared by hand
+with the recorded `curl | sha256sum`, and the rule's real content is how to
+interpret the result — that a changed digest triggers a comparison rather than
+an assumption, and an unchanged one is not evidence that behaviour held still.
+No wave will ever "ship" that. It is recorded here so the status is not read as
+a claim that the whole RFC became code.
+
+Rule 3's numbers interact with the `failure-policy` topic's deadline in a way
+worth knowing: four write retries is roughly eighty seconds of waiting, and the
+working budget after the reserved tail is eighty seconds, so the deadline cuts
+the retry budget short in practice. That is correct — this RFC calls the
+deadline "a hard ceiling regardless of retries remaining" — but it means the
+published retry counts are an upper bound that a real call rarely reaches.
+
+The version pin itself needed no code beyond the base URL and the bearer
+header. Moving to a later API version still means a new RFC that supersedes
+this one.

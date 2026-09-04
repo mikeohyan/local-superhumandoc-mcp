@@ -1,13 +1,13 @@
 ---
 rfc: 0010
 title: Classify transport failures by whether the request was transmitted, and bound every retry by one deadline
-status: Accepted
+status: Implemented
 created: 2026-09-04
 decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: failure-policy
-commits: []
+commits: [70a430cebf0b17ad6ffb203c242c391bed09159a, 849f1cf26fef33d8b36219fb5da71831b6e69d9c, 567be1c6f083f659c33942a813cc3a008a3b8925, 86433ca594af5acd1f34303215e9f0c1e7f183fa, facd027b280cc26d0dadefd256f89b121804245b, 56823d5f3b450a0cce6d42b5316181edbcc5174b, 4f80c977af1beaa8c66b89e236fb845a02969db3, fe0a7b35c5af9ba6f39435026f7331569d5a778d, 5dbfa12f0427c2545e786df0c7af8953565d5422, 5e2fc53dc3ca03a2176fd8d0cd5b2b481b5b76f5, 026140e38ba3893bf5dd1f7c4f386c2fbfe9e1c0]
 tags: [architecture, http-client, reliability, error-handling]
 ---
 
@@ -230,4 +230,39 @@ living document about the client must cite both `upstream-api` and
 
 ## Implementation notes
 
-Left empty at Proposed.
+Shipped as decided. Every rule has a test that fails when the rule is broken,
+confirmed by mutation rather than by the suite passing.
+
+**Rule 8 is half shipped, and deliberately so.** The client raises the typed,
+token-free exceptions the rule specifies, with the required wording — the
+unknown-outcome message keeps the word *unknown* and adds that the write may
+already have been applied. The other half, the tool boundary translating those
+into `ToolError`, has nothing to translate at: no tools are registered yet. It
+lands with the first tool, against the convention `tests/test_error_convention.py`
+already pins.
+
+**Four defects in the implementation plan were found by executing it**, and
+they are recorded here because they say something about how this plan was
+written rather than about the Decision, which needed no change.
+
+The plan's throttle test could not have detected the behaviour it named: it
+advanced the clock far enough to clear the bucket's own window, so the wait it
+claimed to prove was refused never happened at all. The plan let raw transport
+exceptions escape `whoami`, so a machine with no network would have crashed the
+server instead of starting it with scope unknown — the opposite of rule 9, and
+the likeliest path in practice. The plan decided rule 9's 401-versus-403 split
+by searching for the string "401" in an error message, so `AuthFailure` gained
+a real status value. And the plan constructed the client inside the startup
+path, which made that split impossible to test without a network; the startup
+routine now accepts a client.
+
+A fifth was found by review rather than execution: the deadline guard on the
+replay delay existed but no test covered it, and replacing it with a truncating
+sleep left the whole suite green. Rule 6 names three sleep sites and only two
+were pinned.
+
+**Not built here, by scope rather than omission:** no tools are registered,
+even when the destructive flag is on; the 504 page-size ladder belongs to the
+wave that owns paging, and the transport only surfaces the 504; and the export
+and mutation poll loops are tool-layer, so their subordination to the tool-call
+deadline is decided here but exercised there.
