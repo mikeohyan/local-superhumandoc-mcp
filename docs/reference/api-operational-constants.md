@@ -7,10 +7,15 @@
 This file records **what is true** about the API's operational behaviour: rate-limit
 buckets, retry semantics, size ceilings, the export state machine, and the failure
 modes that are not in the specification. Per the `evidence-location` topic (see
-`_rfc/README.md`), nothing here is authoritative for a decision — the constants
-table below is a set of **recommended starting values with their
-justification**, not a commitment. Only an RFC may say the client
-therefore throttles, chunks, or polls a particular way.
+`_rfc/README.md`), nothing here is authoritative for a decision. Only an RFC may
+say the client therefore throttles, chunks, or polls a particular way.
+
+Two kinds of number appear below and they are not interchangeable. Some are
+**operating values an RFC has decided**; this file records them and the evidence
+behind them, and the decision itself lives in the RFC named by the marker. The
+rest are **starting values with a justification and no owner** — a reader may
+adopt one, but adopting it is a decision that belongs in an RFC, not a fact this
+file establishes.
 
 Corrections belong in place. This file is mutable.
 
@@ -22,6 +27,7 @@ Corrections belong in place. This file is mutable.
 | **[SPEC-VERIFIED]** | Read directly out of the v1.6.0 OpenAPI document, or measured against the live API |
 | **[INFERRED-FROM-CLIENTS]** | Observed in the source of a working production client; not documented anywhere |
 | **[CHOSEN — no evidence, tune later]** | A judgement call. No source supports the specific number. Expected to move once the probes in `docs/validation/2026-09-03-api-operational-probes.md` are run |
+| **[DECIDED]** | An operating value set by an RFC, named in the justification column. Recorded here with its evidence; changing it means amending that RFC, not editing this file |
 
 The distinction matters most in the constants table. Several numbers there look
 equally authoritative and are not: `EXPORT_LINK_TTL_S` is staff-quantified,
@@ -76,33 +82,42 @@ And staff advise against encoding them at all — Eric Koleda, 2023-09-08,
 > subject to change**. Instead detect rate limit errors (429 response code) and
 > when they occur wait for a bit and then try again."
 
-### Recommended client-side bucket values
+### Client-side bucket values
 
-Set below the *lowest* candidate for each class, so the client is correct
-whichever value is live.
+These are **decided by the `upstream-api` topic** (see `_rfc/README.md`), not
+chosen here. Each sits below the lowest published candidate for its class, so
+the client is correct whichever figure is live, and below rather than at it
+because the buckets are shared per user and possibly per IP. The justification
+column records why each number is defensible; the rule that produces them is the
+RFC's.
 
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
-| `BUCKET_READ` | 50 per 6 s | [CHOSEN — no evidence, tune later] | 50% of the published 100/6 s |
-| `BUCKET_WRITE` | 5 per 6 s | [CHOSEN — no evidence, tune later] | 50% of the published 10/6 s |
-| `BUCKET_DOC_CONTENT_WRITE` | 2 per 10 s | [CHOSEN — no evidence, tune later] | Below both the 3/10 s and 5/10 s candidates |
-| `BUCKET_LIST_DOCS` | 2 per 6 s | [CHOSEN — no evidence, tune later] | 50% of the published 4/6 s |
+| `BUCKET_READ` | 50 per 6 s | [DECIDED] | 50% of the published 100/6 s; set by the `upstream-api` topic |
+| `BUCKET_WRITE` | 5 per 6 s | [DECIDED] | 50% of the published 10/6 s; set by the `upstream-api` topic |
+| `BUCKET_DOC_CONTENT_WRITE` | 2 per 10 s | [DECIDED] | Below both the 3/10 s and 5/10 s candidates; set by the `upstream-api` topic |
+| `BUCKET_LIST_DOCS` | 2 per 6 s | [DECIDED] | 50% of the published 4/6 s; set by the `upstream-api` topic |
 | `RATE_LIMIT_KEY` | `sha256(token)` | [SPEC-VERIFIED] | Server-side buckets are keyed per **user/IP**, not per token — see §2.2. One limiter instance per credential is the closest a single process can get |
 
 ### 429 retry parameters
 
+The retry policy itself — that a 429 is retried at all, on a bounded budget,
+under a hard deadline, with jitter, and surfaced rather than waited out when the
+budget is spent — is **decided by the `upstream-api` topic**. The values below
+are that policy's parameters.
+
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
 | `RETRY_AFTER_TRUSTED` | `False` | [SPEC-VERIFIED] | No `Retry-After` or `X-RateLimit-*` header exists — see §2.2. Parse opportunistically, never require. **Probe P6, 2026-09-04**: a live attempt to provoke a real 429 (the ethically-bounded maximum of 6 rapid export POSTs) did not succeed — all six returned 202. Whether a genuine 429 carries `Retry-After` remains empirically unanswered; this entry's basis is unchanged and uncontradicted |
-| `RETRY_AFTER_CLAMP_S` | `(1.0, 60.0)` | [CHOSEN — no evidence, tune later] | Bounds an untrusted value if one ever appears |
-| `BACKOFF_BASE_S` | `2.0` | [CHOSEN — no evidence, tune later] | Staff suggest 30/60/120 s, which is intolerable inside a synchronous tool call. See note below |
-| `BACKOFF_FACTOR` | `3.0` | [CHOSEN — no evidence, tune later] | Yields 2 s, 6 s, 18 s, 54 s |
-| `BACKOFF_MAX_S` | `60.0` | [CHOSEN — no evidence, tune later] | Matches the Onyx connector's `max_delay` |
+| `RETRY_AFTER_CLAMP_S` | `(1.0, 60.0)` | [DECIDED] | Bounds an untrusted value if one ever appears; set by the `upstream-api` topic |
+| `BACKOFF_BASE_S` | `2.0` | [DECIDED] | Staff suggest 30/60/120 s, which is intolerable inside a synchronous tool call. See note below; set by the `upstream-api` topic |
+| `BACKOFF_FACTOR` | `3.0` | [DECIDED] | Yields 2 s, 6 s, 18 s, 54 s; set by the `upstream-api` topic |
+| `BACKOFF_MAX_S` | `60.0` | [DECIDED] | Matches the Onyx connector's `max_delay`; set by the `upstream-api` topic |
 | `BACKOFF_JITTER` | equal jitter — `delay/2 + uniform(0, delay/2)` | [INFERRED-FROM-CLIENTS] | Every surveyed client that backs off applies jitter; buckets are shared, so unjittered clients synchronise |
-| `MAX_429_RETRIES_READ` | `3` | [CHOSEN — no evidence, tune later] | ≈26 s of waiting |
-| `MAX_429_RETRIES_WRITE` | `4` | [CHOSEN — no evidence, tune later] | ≈80 s of waiting |
+| `MAX_429_RETRIES_READ` | `3` | [DECIDED] | ≈26 s of waiting; set by the `upstream-api` topic |
+| `MAX_429_RETRIES_WRITE` | `4` | [DECIDED] | ≈80 s of waiting; set by the `upstream-api` topic |
 | `STICKY_429_THRESHOLD` | `3` consecutive 429s, `STICKY_429_WINDOW_S` `120.0` with zero successes | [STAFF] | Sticky account-level 429s exist that backoff cannot clear — see §2.2 |
-| `TOOL_CALL_DEADLINE_S` | `90.0` | [CHOSEN — no evidence, tune later] | Hard ceiling regardless of retries remaining. An MCP tool call has a human waiting on it |
+| `TOOL_CALL_DEADLINE_S` | `90.0` | [DECIDED] | Hard ceiling regardless of retries remaining. An MCP tool call has a human waiting on it; set by the `upstream-api` topic |
 
 On the backoff base: staff's own recommendation is materially slower —
 Eric Koleda, <https://connect.superhuman.com/t/x/42678/3>: *"One popular strategy
@@ -155,7 +170,7 @@ for more than one day after the mutation was completed"* [SPEC-VERIFIED].
 
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
-| `EXPORT_BUCKET` | `BUCKET_DOC_CONTENT_WRITE` | [CHOSEN — no evidence, tune later] | Genuinely undocumented. A POST under a page-content path returning 202; two independent client authors assume the tightest bucket. **Contradicted by probe P6, 2026-09-04**: six export POSTs fired in under 2 seconds all returned 202 with zero 429s — inconsistent with this bucket at either published doc-content rate (3/10s or 5/10s). See §2.5 |
+| `EXPORT_BUCKET` | `BUCKET_WRITE` | [CHOSEN — no evidence, tune later] | **Not** the doc-content bucket. Genuinely undocumented; two independent client authors assume the tightest bucket, and **probe P6, 2026-09-04 refuted that**: six export POSTs in under 2 seconds all returned 202 with zero 429s, inconsistent with 3/10 s or 5/10 s, and served by a distinct `api-doc` backend pod class. A six-request burst is still within the general write bucket's published 10/6 s, so that bucket is not excluded — P6 narrows the question rather than answering it. `BUCKET_WRITE` is the conservative reading of what survives. See §2.5 |
 | `EXPORT_INITIAL_SLEEP_S` | `2.0` | [STAFF] on the need, [CHOSEN] on the magnitude | Staff: *"Simply wait a second and retry"* — see §2.5 |
 | `EXPORT_POLL_INTERVAL_S` | `2.0` | [INFERRED-FROM-CLIENTS] | Status GET is read-bucket; at 2 s this uses ~1.5% of it. Matches the two best-behaved clients |
 | `EXPORT_POLL_BACKOFF` | ×1.5, capped at `EXPORT_POLL_MAX_INTERVAL_S = 15.0` | [INFERRED-FROM-CLIENTS] | `ofloveandhate/codaio` uses 1 s × 1.5 → 15 s |
@@ -166,7 +181,7 @@ for more than one day after the mutation was completed"* [SPEC-VERIFIED].
 | `EXPORT_MAX_LINK_REFRESH` | `2` | [CHOSEN — no evidence, tune later] | Re-GET the status endpoint to mint a fresh link |
 | `EXPORT_CONCURRENCY_PER_PAGE` | `1` | [INFERRED-FROM-CLIENTS] | The blob key is `DOC_EXPORT_RENDERING/{pageId}/{docId}` — keyed by page and doc, **not** by request ID, so concurrent exports of one page collide on one object |
 | `EXPORT_CONCURRENCY_GLOBAL` | `3` | [CHOSEN — no evidence, tune later] | Concurrency limits are entirely undocumented. `professor-eggs/coda-md-export` throttles to avoid "45+ concurrent exports at once" |
-| `EXPORT_MAX_PAGES_PER_CALL` | `50` | [CHOSEN — no evidence, tune later] | Export is single-page; recursion is ours. At 2/10 s, 50 pages is ≥250 s — surface truncation rather than blocking |
+| `EXPORT_MAX_PAGES_PER_CALL` | `50` | [CHOSEN — no evidence, tune later] | Export is single-page; recursion is ours. Bounded by `EXPORT_CONCURRENCY_GLOBAL` and the export deadline rather than by the doc-content rate, which P6 showed export does not draw on — surface truncation rather than blocking |
 
 ---
 

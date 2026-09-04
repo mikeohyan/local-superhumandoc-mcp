@@ -85,13 +85,28 @@ explicitly not as a guarantee:
 | Listing docs | 4 / 6 seconds |
 | Reading analytics | 100 / 6 seconds |
 
-Three rules follow, and they are the substance of this RFC:
+Four rules follow, and they are the substance of this RFC:
 
-1. **The client self-throttles to the most conservative published figure, not
-   the most convenient.** For doc-content writes that means operating at **3 per
-   10 seconds** rather than 5, pending confirmation of the help-centre figure.
-   Being wrong in the conservative direction costs only latency; being wrong in
-   the permissive direction costs 429s in the middle of a user's work.
+1. **The client self-throttles below the most conservative published figure,
+   not at it.** Operating exactly at a published limit would be safe only if
+   this process were the bucket's sole consumer, and rule 2 says it is not, so
+   the margin is not timidity — it follows from the sharing. These are the
+   operating values:
+
+   | Bucket | Operating value | Most conservative published figure |
+   |---|---|---|
+   | Reading data | 50 / 6 s | 100 / 6 s |
+   | Writing data | 5 / 6 s | 10 / 6 s |
+   | Writing doc content | **2 / 10 s** | 3 / 10 s |
+   | Listing docs | 2 / 6 s | 4 / 6 s |
+
+   Doc content sits below both the 3 and the 5 candidate, so the client is
+   correct whichever figure is live. Being wrong in the conservative direction
+   costs only latency; being wrong in the permissive direction costs 429s in the
+   middle of a user's work. These numbers may be tuned against observation
+   without superseding this RFC — the rule is what is decided here, and the
+   evidence behind each number is at
+   `docs/reference/api-operational-constants.md`.
 
 2. **A 429 is an expected outcome, not an exceptional one.** The buckets are
    shared beyond this process — at minimum per user across all docs, and
@@ -101,7 +116,24 @@ Three rules follow, and they are the substance of this RFC:
    succeed. Error messages surfaced to the model must say this, so a 429 does
    not read as a bug in the throttle.
 
-3. **Neither a changed nor an unchanged fingerprint is conclusive.** A changed
+3. **A 429 is retried, on a bounded budget, under a hard deadline.** Because a
+   429 is refused before execution, replaying it is safe on every method,
+   including non-idempotent ones — this is the one retry case that needs no
+   idempotency key. Retries use exponential backoff with equal jitter, since
+   shared buckets synchronise unjittered clients into a thundering herd. A
+   `Retry-After` header is parsed if present but never required and never
+   trusted unclamped; none has been observed. The budget is small and the
+   deadline absolute, because an MCP tool call has a human waiting on it: staff
+   recommend 30/60/120-second backoff, which is right for a batch job and wrong
+   here. Retrying past the deadline is not resilience, it is a hang. When the
+   budget or the deadline is exhausted, or when consecutive 429s indicate an
+   account-level limit that backoff cannot clear, the tool **surfaces the
+   condition to the model rather than continuing to wait** — and says that
+   batching is the effective remedy, which is staff's own first answer to a 429.
+   The specific intervals, ceilings and thresholds are recorded with their
+   justification at `docs/reference/api-operational-constants.md`.
+
+4. **Neither a changed nor an unchanged fingerprint is conclusive.** A changed
    digest may mean nothing more than a re-render with different substitutions,
    so it triggers a comparison of `info.version` and the endpoints this project
    calls — not an assumption that the API moved. An unchanged digest is **not**
@@ -166,8 +198,10 @@ arrives despite available local headroom has a documented explanation rather tha
 looking like a defect, which saves a future session a debugging session chasing a
 limiter bug that does not exist.
 
-**Makes hard.** Doc-content writes run at 3 per 10 seconds rather than 5 — forty
-percent slower on the tightest bucket in the API. Batch operations will feel it.
+**Makes hard.** Doc-content writes run at 2 per 10 seconds rather than the
+published 5 — sixty percent slower on the tightest bucket in the API. Batch
+operations will feel it, and batching is the intended answer rather than a
+workaround.
 
 Page-markdown reads were originally counted in that cost, on the reasoning that
 the export kickoff is a POST and so must draw on the doc-content-write bucket.
