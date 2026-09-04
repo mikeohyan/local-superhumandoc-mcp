@@ -72,10 +72,14 @@ class UpstreamRefused(ClientError):
 
 
 class AuthFailure(ClientError):
+    # `status` is kept as a value because 401 and 403 mean different things:
+    # one is a verdict on the token, the other is what the token teaches about
+    # a single call. Callers must not have to read that out of the message.
     def __init__(self, operation: str, status: int) -> None:
         super().__init__(
             f"{operation}: the API rejected the token with HTTP {status}."
         )
+        self.status = status
 
 
 class ResponseUnusable(ClientError):
