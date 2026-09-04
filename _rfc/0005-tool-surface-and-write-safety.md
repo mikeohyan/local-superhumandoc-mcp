@@ -75,10 +75,27 @@ operations in the specification.
 
 **Reading a page as markdown costs a write-budget slot.** There is no synchronous
 markdown read. The sequence is a metadata GET, a `POST .../export`, a poll, and a
-fetch of a short-lived pre-signed link. Because step two is a POST it draws on the
-doc-content write bucket recorded in RFC 0008 — the tightest in the API — so an
-uncached page read rate-limits the server by *reading*. A read-only-restricted
-token cannot read page content at all, for the same reason.
+fetch of a short-lived pre-signed link. Because step two is a POST it is charged
+against a write budget rather than a read one, and a read-only-restricted token
+cannot read page content at all — a scope consequence of the POST, independent of
+any rate limit.
+
+This RFC originally placed that POST in the doc-content write bucket recorded in
+RFC 0008 — the tightest in the API — and concluded that an uncached page read
+rate-limits the server by *reading*. **Probe P6 refuted that on 2026-09-04.** Six
+export POSTs fired back-to-back all returned 202, exceeding that bucket's
+published capacity, and export is served by a visibly separate backend pod class.
+RFC 0008 carries the correction; the evidence is at
+`docs/validation/2026-09-03-api-operational-probes.md`.
+
+What P6 does **not** establish is which budget export does draw on. A six-request
+burst is within the general write bucket's published capacity of 10 per 6
+seconds, so that bucket is not excluded — the finding narrows the question rather
+than closing it. Page reads are therefore cheaper than this RFC first assumed and
+do not contend with page edits for the tightest bucket in the API, but they are
+not free, they still require write scope, and caching them remains worthwhile on
+latency alone: the export flow is four sequential round trips with a poll in the
+middle, whatever it costs in budget.
 
 **Row querying is far weaker than it looks.** The `query` parameter on `listRows`
 accepts a single column and an exact value, with no operators — no `contains`, no
