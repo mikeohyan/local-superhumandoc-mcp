@@ -22,3 +22,6 @@ venv/
 
 # Note: uv.lock is intentionally NOT ignored — it is committed so builds
 # are reproducible.
+
+# Agent worktrees — checkouts of this repo, never content to commit.
+.claude/worktrees/
