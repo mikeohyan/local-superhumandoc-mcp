@@ -15,6 +15,9 @@ _AFFIRMATIVE = frozenset({"1", "true", "yes", "on"})
 _PREFIX = "SHDOC_"
 _REQUIRED = ("SHDOC_API_KEY", "SHDOC_DOC_ID")
 _FLAG = "SHDOC_ALLOW_DESTRUCTIVE"
+# A locator, not configuration: it says where to look, and the file it names
+# has already been read by the time anything below runs.
+_LOCATOR = "SHDOC_ENV_FILE"
 
 
 def parse_affirmative(value: str | None) -> bool:
@@ -83,9 +86,13 @@ def load_config(
     from_file = {
         key: value
         for key, value in dotenv_values(env_file).items()
-        if key.startswith(_PREFIX) and value is not None
+        if key.startswith(_PREFIX) and key != _LOCATOR and value is not None
     }
-    from_env = {k: v for k, v in environ.items() if k.startswith(_PREFIX)}
+    from_env = {
+        k: v
+        for k, v in environ.items()
+        if k.startswith(_PREFIX) and k != _LOCATOR
+    }
 
     resolved: dict[str, str] = {}
     sources: dict[str, str] = {}
@@ -107,6 +114,13 @@ def load_config(
     # cannot arm a destructive tool in a project that disables it.
     present = [v for v in (from_file.get(_FLAG), from_env.get(_FLAG)) if v is not None]
     allow_destructive = bool(present) and all(parse_affirmative(v) for v in present)
+    if len(present) == 2 and parse_affirmative(present[0]) != parse_affirmative(
+        present[1]
+    ):
+        # Precedence named the source that lost. Reporting it would tell a
+        # reader the environment disabled the tools when the environment asked
+        # for them and the file refused, which is the opposite of what happened.
+        sources[_FLAG] = "restricted"
 
     return Config(
         api_key=resolved["SHDOC_API_KEY"],

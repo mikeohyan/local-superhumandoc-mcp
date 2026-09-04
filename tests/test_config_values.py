@@ -106,3 +106,27 @@ def test_both_agreeing_enables(tmp_path: Path) -> None:
     _env_file(tmp_path, REQUIRED + "SHDOC_ALLOW_DESTRUCTIVE=yes\n")
     config = load_config(None, {"SHDOC_ALLOW_DESTRUCTIVE": "on"}, tmp_path)
     assert config.allow_destructive is True
+
+
+def test_disagreement_is_reported_as_restricted_not_as_a_source(
+    tmp_path: Path,
+) -> None:
+    _env_file(tmp_path, REQUIRED + "SHDOC_ALLOW_DESTRUCTIVE=false\n")
+    config = load_config(None, {"SHDOC_ALLOW_DESTRUCTIVE": "1"}, tmp_path)
+    assert config.allow_destructive is False
+    assert config.sources["SHDOC_ALLOW_DESTRUCTIVE"] == "restricted"
+
+
+def test_agreement_still_reports_an_ordinary_source(tmp_path: Path) -> None:
+    _env_file(tmp_path, REQUIRED + "SHDOC_ALLOW_DESTRUCTIVE=1\n")
+    config = load_config(None, {"SHDOC_ALLOW_DESTRUCTIVE": "true"}, tmp_path)
+    assert config.sources["SHDOC_ALLOW_DESTRUCTIVE"] == "environment"
+
+
+def test_the_locator_is_not_configuration(tmp_path: Path) -> None:
+    """SHDOC_ENV_FILE carries the prefix but says only where to look. Reporting
+    it beside the resolved values invites reading it as one of them."""
+    named = tmp_path / "named.env"
+    named.write_text(REQUIRED + "SHDOC_ENV_FILE=/ignored\n")
+    config = load_config(None, {"SHDOC_ENV_FILE": str(named)}, tmp_path)
+    assert "SHDOC_ENV_FILE" not in config.sources

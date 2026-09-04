@@ -59,3 +59,16 @@ def test_missing_env_var_path_also_raises(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as excinfo:
         resolve_env_file(None, {"SHDOC_ENV_FILE": str(missing)}, tmp_path)
     assert str(missing) in str(excinfo.value)
+
+
+def test_project_dir_without_an_env_file_falls_through_to_cwd(
+    tmp_path: Path,
+) -> None:
+    """Candidate 3 is inferred, not stated, so a miss is not an error."""
+    project = tmp_path / "project"
+    project.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / ".env").write_text("")
+    got = resolve_env_file(None, {"CLAUDE_PROJECT_DIR": str(project)}, cwd)
+    assert got == cwd / ".env"
