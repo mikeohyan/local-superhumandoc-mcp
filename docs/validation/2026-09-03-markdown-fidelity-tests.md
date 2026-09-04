@@ -88,7 +88,7 @@ Confidence markers: **[S]** confirmed by Coda/Superhuman staff or first-party do
 
 ## Risk assessment — blunt
 
-1. **Whole-page read-modify-write over markdown is not a supported editing model.** Coda says so directly. Their own MCP does not do it: it reads markdown *with `[[elementId]]` annotations* and edits via `replace_element_text` / `delete_element` scoped to those IDs, with atomic rollback across <=10 operations. That is the design our anchored editing should copy.
+1. **Whole-page read-modify-write over markdown is not a supported editing model.** Coda says so directly. Their own MCP does not do it: it reads markdown *with `[[elementId]]` annotations* and edits via `replace_element_text` / `delete_element` scoped to those IDs, with atomic rollback across <=10 operations. The `tool-surface` topic subsequently adopted that shape — element-scoped, ID-anchored editing — for the same reason.
 2. **`insertionMode: "replace"` with no `elementId` is a page-wide content wipe followed by a markdown-only rebuild.** Anything markdown cannot express — tables, buttons, controls, callouts, dividers, images, embeds, collapsible lists, pull quotes, colors — is by construction not in the payload. Whether the backend preserves native objects it can't see is **undocumented**. The spec describes replace-without-elementId as operating "on the entire page". **Rated: likely destructive, unconfirmed. Test B1 before shipping anything.**
 3. **Failures are silent.** Writes return **202 + requestId**; malformed content surfaces only as `MutationStatus.warning` on a *separate* `GET /mutationStatus/{requestId}` call that no open-source implementation makes.
 4. **Instability compounds.** If export normalizes (`*`->`-`, renumbered lists, reflowed indentation), every RMW cycle rewrites lines the agent never touched — spurious diffs, broken text anchors, decayed content.
@@ -104,8 +104,9 @@ recorded here as the evidence trail rather than as choices this file makes:
 - Editing is element-scoped and anchored on IDs obtained from the synchronous
   page-content read; additive editing is a separate tool from replacement.
 - Whole-page replacement is a separate, explicitly named destructive tool, gated
-  behind an environment flag and additionally requiring an explicit force
-  parameter.
+  behind an environment flag. Its `force` parameter is optional and exists to
+  override the guard below when it refuses — it is not required on a page the
+  guard passes.
 - A pre-write guard lists the document's tables, controls and formulas filtered
   on `parent.id == pageId` — all three schemas carry `parent: PageReference` —
   and refuses, naming what it found.

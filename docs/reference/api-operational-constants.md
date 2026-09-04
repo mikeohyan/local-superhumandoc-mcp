@@ -521,9 +521,14 @@ discovering you are wrong before your users do. An MCP tool that silently return
 incomplete delta to a language model is worse than one that does not offer the
 feature.
 
-If it is ever added: pass the token opaquely, send it as the only query parameter,
-treat any non-2xx on a token'd request as "invalid → full resync" without retrying,
-and label every result `deletions_included: false`.
+Should it ever be proposed, these are the constraints the facts above impose,
+and the shape of the decision an RFC would have to make: the token is opaque, so
+nothing can be inferred from its contents; filters appear to be baked in at
+creation time, so sending it alongside other query parameters has undefined
+meaning; a non-2xx on a tokened request is undiagnosable, so the only sound
+reading is that the token is invalid and a full resync is needed; and deletions
+are structurally unreportable, so no result derived from one can claim to be a
+complete delta. Those are consequences of the evidence, not a chosen design.
 
 ## 2.5 Export mechanics
 
@@ -874,10 +879,17 @@ therefore pollable through `/mutationStatus/{requestId}`: `createPage`,
 `updateRow`, `deleteRow`, `pushButton`, `publishDoc`, `triggerWebhookAutomation`.
 
 Three do **not**: `addCustomDocDomain`, `deleteDoc`, and — the one that matters
-here — `beginPageContentExport`, whose 202 returns an export id polled at
-`GET .../export/{requestId}` instead. A blanket "if 202 then poll
-`getMutationStatus`" rule would therefore break on the export kickoff, which is
-the single most-used write in a read path.
+here — `beginPageContentExport`. The export's 202 returns an id polled on its own
+path; the specification names that path parameter `requestId`, while the response
+body field carrying the value is `id` and is also reachable as `href`. It is not
+a mutation id and `/mutationStatus/` will not accept it. A blanket "if 202 then
+poll `getMutationStatus`" rule therefore breaks on the export kickoff, which is
+the most-used write in a read path.
+
+Note that `deleteDoc` mutates and yet carries no `requestId`, so the general
+statement that *every* mutating endpoint returns one is too broad. It holds for
+every endpoint the tool surface actually calls, which is what the design depends
+on, but not for the API as a whole.
 
 The page write surface in full: `POST /docs/{docId}/pages` (create),
 `PUT /docs/{docId}/pages/{pageIdOrName}` (`updatePage`, which carries

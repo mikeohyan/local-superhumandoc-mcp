@@ -362,8 +362,9 @@ a user's regional settings." Combined with Koleda's "use the formats the doc int
 this means **`03/04/2026` can resolve to 3 April or 4 March depending on the doc it is
 written to.** A server writing on behalf of many users' docs cannot know the locale.
 
-**Rule: emit ISO 8601 exclusively (`YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`), and reject or
-normalise ambiguous input before it reaches the API.** Unix timestamps are also
+The `tool-surface` topic decided accordingly that cell writes send ISO 8601 only
+(`YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`) and reject ambiguous input before a request
+is made; see `_rfc/README.md`. Unix timestamps are also
 unambiguous and documented, but note the vendor's caveat that Coda renders them in Pacific
 time. T12 demonstrates the hazard concretely.
 
@@ -396,7 +397,9 @@ Eric Koleda,
 
 `format.type` and `format.isArray` are heuristics, not contracts — a formula-driven text
 column can return relation objects, and `isArray` is known to misreport on attachment
-columns. Degrade gracefully; do not hard-fail on column metadata.
+columns. **No RFC decides how a client should respond to that**, so whether
+column metadata is treated as advisory or as a hard precondition is an open
+question rather than something this file settles.
 
 ### 5. Other silent-failure traps
 
