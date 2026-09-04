@@ -1,9 +1,9 @@
 ---
 rfc: 0005
 title: Expose element-scoped editing tools and gate destructive operations behind a flag
-status: Proposed
+status: Accepted
 created: 2026-09-03
-decided:
+decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: tool-surface

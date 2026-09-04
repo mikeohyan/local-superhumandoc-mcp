@@ -1,9 +1,9 @@
 ---
 rfc: 0006
 title: Resolve credentials and document scope from a project-local .env inside the server
-status: Proposed
+status: Accepted
 created: 2026-09-03
-decided:
+decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: config-resolution
@@ -299,6 +299,21 @@ global state.
 **Makes hard.** Anything that wants to change configuration must restart the
 server, because registration is static. Diagnosing a bad `.env` requires reading
 stderr, which some clients bury.
+
+Three choices here trade convenience for safety, and each will occasionally
+annoy someone who knew what they were doing. A stale `--env-file` or
+`SHDOC_ENV_FILE` now stops the server at startup rather than falling back to a
+working default, so a path that rots breaks a session outright instead of
+degrading quietly — which is the point, but it is still a session that stopped.
+Reading only the `SHDOC_` prefix means a project cannot route any other value to
+this server through its `.env`, and would have to use the `env` block for that.
+And because `SHDOC_ALLOW_DESTRUCTIVE` resolves to the restrictive value on
+disagreement, a user who deliberately exports it to enable the destructive tools
+will find it ignored in any project whose `.env` sets it off, with only the
+startup line to explain why. That is the intended answer — the project's own
+file should win when the two disagree about arming a destructive surface — but
+it inverts the precedence every other variable follows, and it will surprise
+someone.
 
 **Commits us to.** A dependency on `CLAUDE_PROJECT_DIR` for the path that
 matters. That variable is documented on the Claude Code MCP documentation page
