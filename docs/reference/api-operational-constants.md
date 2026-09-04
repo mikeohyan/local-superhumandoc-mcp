@@ -93,7 +93,7 @@ whichever value is live.
 
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
-| `RETRY_AFTER_TRUSTED` | `False` | [SPEC-VERIFIED] | No `Retry-After` or `X-RateLimit-*` header exists — see §2.2. Parse opportunistically, never require |
+| `RETRY_AFTER_TRUSTED` | `False` | [SPEC-VERIFIED] | No `Retry-After` or `X-RateLimit-*` header exists — see §2.2. Parse opportunistically, never require. **Probe P6, 2026-09-04**: a live attempt to provoke a real 429 (the ethically-bounded maximum of 6 rapid export POSTs) did not succeed — all six returned 202. Whether a genuine 429 carries `Retry-After` remains empirically unanswered; this entry's basis is unchanged and uncontradicted |
 | `RETRY_AFTER_CLAMP_S` | `(1.0, 60.0)` | [CHOSEN — no evidence, tune later] | Bounds an untrusted value if one ever appears |
 | `BACKOFF_BASE_S` | `2.0` | [CHOSEN — no evidence, tune later] | Staff suggest 30/60/120 s, which is intolerable inside a synchronous tool call. See note below |
 | `BACKOFF_FACTOR` | `3.0` | [CHOSEN — no evidence, tune later] | Yields 2 s, 6 s, 18 s, 54 s |
@@ -143,7 +143,7 @@ identify which row in the batch was at fault.
 |---|---|---|---|
 | `MUTATION_INITIAL_SLEEP_S` | `3.0` | [STAFF] on the need, [CHOSEN] on the magnitude | "add a short sleep, **maybe a few seconds**, before the first time you call that endpoint" — see §2.1 |
 | `MUTATION_POLL_INTERVAL_S` | `2.0` | [CHOSEN — no evidence, tune later] | Status reads are the cheapest bucket |
-| `MUTATION_404_GRACE_S` | `15.0` | [CHOSEN — no evidence, tune later] | A 404 before this is replication lag, not a missing mutation. Calibrate with probe P4 |
+| `MUTATION_404_GRACE_S` | `15.0` | [CHOSEN — no evidence, tune later] | A 404 before this is replication lag, not a missing mutation. **Probe P4, 2026-09-04**: two independent write→poll sequences on a near-empty scratch doc never produced a 404, including at t=0 immediately after the write — the endpoint consistently returned 200 with `completed:false` instead. `completed` flipped to `true` between t=16s and t=18s. The 404-replication race did not reproduce on this doc; the observed bottleneck was completion latency (~18s), not a 404 window |
 | `MUTATION_DEADLINE_S` | `60.0` | [CHOSEN — no evidence, tune later] | Then return "queued, not confirmed" — never an error. Staff describe the underlying delay as "30 seconds to a few minutes" and architectural |
 
 The endpoint is at the **root**: `GET /mutationStatus/{requestId}`, *not*
@@ -155,13 +155,13 @@ for more than one day after the mutation was completed"* [SPEC-VERIFIED].
 
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
-| `EXPORT_BUCKET` | `BUCKET_DOC_CONTENT_WRITE` | [CHOSEN — no evidence, tune later] | Genuinely undocumented. A POST under a page-content path returning 202; two independent client authors assume the tightest bucket. Settle with probe P6 |
+| `EXPORT_BUCKET` | `BUCKET_DOC_CONTENT_WRITE` | [CHOSEN — no evidence, tune later] | Genuinely undocumented. A POST under a page-content path returning 202; two independent client authors assume the tightest bucket. **Contradicted by probe P6, 2026-09-04**: six export POSTs fired in under 2 seconds all returned 202 with zero 429s — inconsistent with this bucket at either published doc-content rate (3/10s or 5/10s). See §2.5 |
 | `EXPORT_INITIAL_SLEEP_S` | `2.0` | [STAFF] on the need, [CHOSEN] on the magnitude | Staff: *"Simply wait a second and retry"* — see §2.5 |
 | `EXPORT_POLL_INTERVAL_S` | `2.0` | [INFERRED-FROM-CLIENTS] | Status GET is read-bucket; at 2 s this uses ~1.5% of it. Matches the two best-behaved clients |
 | `EXPORT_POLL_BACKOFF` | ×1.5, capped at `EXPORT_POLL_MAX_INTERVAL_S = 15.0` | [INFERRED-FROM-CLIENTS] | `ofloveandhate/codaio` uses 1 s × 1.5 → 15 s |
 | `EXPORT_DEADLINE_S` | `90.0` | [CHOSEN — no evidence, tune later] | No source quantifies export duration. `codaio` allows 300 s; 90 s fits a synchronous tool call |
 | `EXPORT_404_GRACE_S` | `20.0` | [CHOSEN — no evidence, tune later] | A 404 within this window is replication lag. Calibrate with probe P5 |
-| `EXPORT_LINK_TTL_S` | `300` (5 min) | **[STAFF]** | *"the downloadLink returned by the API expires after only a few minutes"*; the sibling Admin API endpoint publishes exactly 5 minutes — see §2.5 |
+| `EXPORT_LINK_TTL_S` | `300` (5 min) | **[STAFF], confirmed [SPEC-VERIFIED] 2026-09-04** | *"the downloadLink returned by the API expires after only a few minutes"*; the sibling Admin API endpoint publishes exactly 5 minutes. **Directly observed by probe P5b**: link served content at t=300s, failed by t=330s; the signed URL's own `X-Amz-Expires=300` query parameter corroborates this independent of staff prose — see §2.5 |
 | `EXPORT_FILE_TTL` | ~a few days | [STAFF] | *"the exported file remains live for a few days"* — the file outlives the link, which is why re-polling mints a fresh URL |
 | `EXPORT_MAX_LINK_REFRESH` | `2` | [CHOSEN — no evidence, tune later] | Re-GET the status endpoint to mint a fresh link |
 | `EXPORT_CONCURRENCY_PER_PAGE` | `1` | [INFERRED-FROM-CLIENTS] | The blob key is `DOC_EXPORT_RENDERING/{pageId}/{docId}` — keyed by page and doc, **not** by request ID, so concurrent exports of one page collide on one object |
@@ -205,6 +205,25 @@ referenced by 49 operations — **all of them Packs, Pack-logs, or agent-logs
 endpoints**. Not one docs, rows, pages, tables, or columns operation uses it. On
 every endpoint this project touches, a staleness 400 and a malformed-request 400 are
 byte-identical.
+
+**Corrected by live observation, 2026-09-04 (probes P2/P3).** `listPageContent`
+(`GET /docs/{docId}/pages/{pageId}/content`) *does* return a
+`codaType`/`codaDetail.issues`-bearing 400 for a real schema violation (tested:
+`contentFormat=bogusFormat`) — the shape claim above does not hold for at least
+this docs-domain operation. Separately, and more consequentially:
+`X-Coda-Doc-Version` was found to reject **any value other than the literal string
+`latest`** with `400 {"message":"Doc is not yet up to date."}` — reproduced
+deterministically across multiple endpoints and before any write had been made in
+the session, i.e. with no plausible pending mutation. This is plausibly the *same*
+underlying mechanism as genuine staleness (the header may compare against an
+actual current-version stamp, with `latest` special-cased to always pass, so an
+arbitrary string simply never matches) rather than a separate validation path —
+it is not necessarily evidence that the message text is fake. But it does mean an
+observed `"Doc is not yet up to date."` 400 during real usage, where the header is
+always sent as `latest`, has not been *confirmed* to require an actual pending
+mutation, only demonstrated to require `header value != "latest"`. Genuine
+staleness immediately after a real write was not observed in this session (10
+reads post-write all returned 200 — see the probe plan's Results for P3).
 
 The only implementation found that attempts the distinction substring-matches an
 undocumented message, hedging across four guesses — `jimbaxley/coda-to-framer-node`,
@@ -534,7 +553,23 @@ is no request affinity to hide replication lag [SPEC-VERIFIED by live probe].
 doc-content bucket, staff describe it as "doc content **changes**" and an export
 mutates nothing; *for* it, the call is a POST under `/docs/{docId}/pages/…`
 returning 202, and rendering is expensive. Two independent client authors assume the
-tightest bucket. Probe P6 settles it.
+tightest bucket.
+
+**Probe P6, 2026-09-04, live measurement: six export POSTs fired in under 2 seconds
+all returned 202. Zero 429s.** This is inconsistent with the export POST sharing
+the doc-content-write bucket at either published rate (3/10s or 5/10s) — either
+figure would have produced a 429 by the fourth or fifth request in that window.
+Whether export uses the general-write bucket, an export-specific bucket, or no
+enforced bucket at all could not be determined from six requests (the plan
+deliberately bounds this probe there), but it is measurably more permissive than
+doc-content-write. **Incidental corroborating detail:** the export POST's response
+headers show `x-coda-server: api-doc` and pod names prefixed `api-doc-...`,
+distinct from `x-coda-server: api` / `api-...` seen on every other endpoint probed
+in the same session (`/whoami`, `/docs/{docId}/tables`, `/docs/{docId}/pages/...`)
+— export traffic is served by a visibly separate backend pod class, consistent
+with (though not proof of) a separate rate-limit bucket. A real 429 was not
+provoked, so the `Retry-After` question (see §1.1 `RETRY_AFTER_TRUSTED`) remains
+unanswered.
 
 **Concurrency limits are undocumented.** Zero forum hits, nothing in either spec.
 That is absence of documentation, not evidence that no limit exists.
@@ -571,6 +606,13 @@ fixed within days, but the error *shape* is real):
 Note the key is `DOC_EXPORT_RENDERING/{pageId}/{docId}` — keyed by page and doc, not
 by request ID.
 
+**Directly observed, 2026-09-04 (probe P5b): the link is valid through t=300s and
+expired by t=330s after mint, confirming `EXPORT_LINK_TTL_S = 300`.** The expired
+link returned **`HTTP 403` with `<Code>AccessDenied</Code>`** — a different status
+code and S3 error code than the `NoSuchKey`-on-200 shape above, but the same
+failure family (an `<?xml`-prefixed body). Both shapes must be treated as
+fatal-for-this-link; do not assume the failure is always disguised behind a 200.
+
 **The download host is not the API host** [SPEC-VERIFIED by live probe].
 `https://docs.superhuman.com/blobs/DOC_EXPORT_RENDERING/…` is served by the web app,
 not the API pod: it returns none of `x-coda-server: api` / `x-coda-pod` that every
@@ -584,7 +626,11 @@ with a bare `axios.get` and it works.
 [SPEC-VERIFIED]:
 
 - Returns `PageContentList`: content elements, one per line, each with a stable
-  element `id`, a `style` (`PageLineStyle`), and a `lineLevel`.
+  element `id`. **Correction, [SPEC-VERIFIED] by live probe P9, 2026-09-04:**
+  `style`, `format`, `content`, and `lineLevel` are not top-level fields on each
+  item — they are nested one level down under `item.itemContent`. Observed shape:
+  `{"id": "cl-...", "type": "line", "itemContent": {"style": "paragraph",
+  "format": "plainText", "content": "...", "lineLevel": 0}}`.
 - `limit` uses the distinct `pageContentLimit` parameter — `maximum: 500`,
   `default: 50`.
 - `contentFormat` is an enum with exactly one legal member: **`plainText`**.
@@ -640,6 +686,11 @@ Staff prose says `complete` (§2.5), and every surveyed third-party client compa
 against `"complete"` without anyone filing a bug — if the wire value were
 `completed`, Pipedream's `do…while (exportStatus !== "complete")` would loop
 forever and would have been reported. So `complete` is very probably correct.
+
+**Confirmed by live observation, 2026-09-04 (probe P5a).** The begin-response
+`status` was `"inProgress"`, not the spec example's `"complete"` — the example is
+wrong, as predicted above. The completed-response `status` was `"complete"`, not
+`"completed"` — the code samples are wrong, also as predicted above.
 
 **But do not depend on it.** The field is typed as an unconstrained string by the
 API's own schema, so reading it is guessing. Gate on **presence of `downloadLink`**
