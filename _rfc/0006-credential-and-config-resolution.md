@@ -26,14 +26,20 @@ The obvious answer, "read `.env` from the current directory", does not survive
 contact with how stdio servers are launched.
 
 **A stdio MCP server does not control its own working directory. The client sets
-it.** Claude Code's documented behaviour is that the working directory is the
-project directory for a project-scoped or local-scoped server, but the
-configuration directory (`~/.claude`) for a user-scoped server. The same server
-binary, serving the same project, sees a different working directory depending
-on a registration choice made elsewhere. Anything resting on `Path.cwd()` — or on
-a `find_dotenv()`-style walk upward from it — therefore works until someone
-registers the server at a different scope, or runs it under a different client,
-at which point it silently loads the wrong file or none at all.
+it.** Claude Code gives a spawned stdio server the directory `claude` was
+launched from, uniformly across project, local and user registration scopes. The
+client's documentation is easily read as saying the working directory is
+`~/.claude` for a user-scoped server; that table describes a different helper
+process, and direct observation shows no scope-dependent variation for the stdio
+server itself. The hazard is real but differently shaped: the working directory
+is the *launch* directory, so a user who runs `claude` from a subdirectory of
+their project gets that subdirectory. Anything resting on `Path.cwd()` therefore
+works until someone changes directory before launching, at which point it
+silently loads the wrong file or none at all. A `find_dotenv()`-style walk
+upward survives that case but introduces its own, since it keeps climbing past
+the project root and can load an unrelated `.env` from a parent directory or
+from home. The observations are recorded at
+`docs/reference/mcp-client-environment.md`.
 
 The second constraint rules out the mechanism the client appears to offer.
 Claude Code supports `${VAR}` and `${VAR:-default}` expansion inside `.mcp.json`
@@ -64,17 +70,31 @@ candidates in order and taking the first that exists:
 3. `$CLAUDE_PROJECT_DIR/.env`
 4. `./.env`, relative to whatever working directory the client happened to set
 
-Candidate 3 is the one that carries normal operation. Claude Code sets
-`CLAUDE_PROJECT_DIR` in the spawned server's environment to the project root
-specifically so that servers can resolve project-relative paths without
-depending on the working directory. It is the same value hooks receive. Because
-it is provided by the client rather than inferred, it stays correct across
-registration scopes.
+Candidate 3 carries normal operation when `claude` is launched from the project
+root, which is the common case. Claude Code sets `CLAUDE_PROJECT_DIR` in the
+spawned server's environment, and it is the same value hooks receive. Because it
+is provided by the client rather than inferred, it stays correct across
+registration scopes — but it does **not** stay correct across launch
+directories. It carries the directory `claude` was started in, not a project
+root found by walking up. `.mcp.json` discovery *does* walk up, so a session
+started from a subdirectory registers this server correctly and then hands it
+the wrong directory. Candidate 4 fails identically and for the same reason: both
+resolve against the launch directory.
 
-Candidates 1 and 2 are escape hatches for clients that set no such variable, and
-for pointing a server at a `.env` outside the project. Candidate 4 is a
-last-resort fallback that makes the common interactive case work; it is
-deliberately last, because it is the one that can be wrong without being empty.
+Candidates 1 and 2 are therefore load-bearing more often than "escape hatch"
+suggests. They are the only candidates independent of the launch directory, and
+only when given an absolute path. They cover clients that set no such variable,
+a `.env` outside the project, and any project that cannot guarantee where
+`claude` is started. An absolute path belongs in a local, gitignored
+registration rather than in the committed project `.mcp.json`, where it would be
+identical for every clone and every machine. Candidate 4 remains last because it
+is the one that can be wrong without being empty.
+
+Two mechanisms that look like they would close the gap do not.
+`${CLAUDE_PROJECT_DIR}` is not expanded inside `.mcp.json`'s `args`, which
+receives the literal string; and a `SessionStart` hook can neither be relied on
+to run before the server spawns nor influence the environment it receives. Both
+were tested; see `docs/reference/mcp-client-environment.md`.
 
 The file is loaded with `override=False`. Real environment variables therefore
 win over file contents, so anything a client injects through `.mcp.json`'s `env`
@@ -215,14 +235,16 @@ server, because registration is static. Diagnosing a bad `.env` requires reading
 stderr, which some clients bury.
 
 **Commits us to.** A dependency on `CLAUDE_PROJECT_DIR` for the path that
-matters. That variable is documented on the Claude Code MCP documentation page,
-but it is **absent from the environment-variables reference page**, and the
-research behind this RFC verified the mechanism by setting it manually rather
-than by observing Claude Code set it in a real session. It is therefore an
-assumption, not a confirmed fact, and the startup log line is how the assumption
-gets checked on first install rather than in production. If it turns out not to
-be set, candidates 1, 2 and 4 still work and the fix is a documentation change,
-not a redesign.
+matters. That variable is documented on the Claude Code MCP documentation page
+but is **absent from the environment-variables reference page**. It has since
+been confirmed by direct observation to be set for spawned stdio servers under
+every registration scope, so the dependency itself is sound. It was confirmed
+just as directly to be the launch directory rather than the project root, and no
+way to pin it was found: `--add-dir` does not affect it, a shell-preset value is
+overwritten, and no setting or CLI command assigns it. The startup log line is
+therefore not a first-install check that can later be retired — it is the
+standing signal for a failure that recurs whenever a session is started from a
+subdirectory.
 
 Under other MCP clients — Claude Desktop, Cursor, an editor extension — neither
 `CLAUDE_PROJECT_DIR` nor a useful working directory can be assumed. Those clients
