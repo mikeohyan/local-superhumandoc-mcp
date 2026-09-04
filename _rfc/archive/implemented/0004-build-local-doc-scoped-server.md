@@ -1,13 +1,13 @@
 ---
 rfc: 0004
 title: Build a local doc-scoped MCP server rather than adopting the official or community servers
-status: Accepted
+status: Implemented
 created: 2026-09-03
 decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: server-ownership
-commits: []
+commits: [0dea451e478a245e6a8fb1dd6d55f52ccf5da473, 3d9acfbb8fa92e61862a34f724a844ab8d7ceae2, 78afce7e16a7ae05e61f6d4f86f7bcff63cc349b, 2daf4ab757101efe094d9e89d1c37cd4279e91d4]
 tags: [architecture, mcp, superhuman-docs]
 ---
 
@@ -217,4 +217,32 @@ implementation reaches the quality bar this one is being built to.
 
 ## Implementation notes
 
-Left empty at Proposed.
+**This RFC decided which server to build, so what shipped is the server's shape
+rather than a feature.** Every clause of the Decision is now true of a running
+process: `superhumandoc_mcp` is a local stdio server started by the MCP client,
+written in Python and managed by `uv`, pinned to one document ID, and reading
+credentials from that project folder's `.env`. It was confirmed end to end with
+the network jailed, so nothing about the check depended on the API being
+reachable.
+
+**It has no commits of its own, and that is the honest record.** The commits
+listed above are shared with RFC 0007, which packaged the process, and RFC 0006,
+which wired the document scope and the `.env` into it. This RFC chose the shape
+those waves then built; it added no code beyond them. Listing them anyway points
+a reader at where the shape actually lives, which an empty list would not.
+
+**The capability argument is not yet exercised.** The reason given here for
+owning the code — that the tool surface can encode the API's hazards instead of
+passing them through to the model — is discharged by RFC 0005, which has not
+shipped. The server today registers zero tools. This transition records that the
+ownership question is settled and the runtime shape exists; it does not claim the
+surface argued for in the Context section has been built.
+
+**One gap in the Alternatives section stays open.** The vendor's connection
+documentation sits behind a bot challenge and was never read, so the official
+server's authentication model remains unestablished. That does not affect this
+decision, because the deployment model alone is disqualifying. It becomes live
+again under the Watch for clause — if the vendor ships a locally-runnable or
+document-scoped server, the comparison has to be made properly, and closing this
+gap is part of making it.
+
