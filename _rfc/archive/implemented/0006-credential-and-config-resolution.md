@@ -1,13 +1,13 @@
 ---
 rfc: 0006
 title: Resolve credentials and document scope from a project-local .env inside the server
-status: Accepted
+status: Implemented
 created: 2026-09-03
 decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: config-resolution
-commits: []
+commits: [b6e174d11c65892806d55eb4e2c5d42aa1e80214, 9614f243f7647db1a599f8c27161492dc83679cf, b5ae13df76992e1eb98b5bbadc2cd3cac2fde720, 940ae2d50401629548e57477856580c85ff867e5, 78afce7e16a7ae05e61f6d4f86f7bcff63cc349b, e45262913dd0a4784c143b10c475a7b582e9078f, 2cb32d59b93a1140e932b4a3836d8ffe3b4b733f, 2daf4ab757101efe094d9e89d1c37cd4279e91d4]
 tags: [architecture, configuration, security]
 ---
 
@@ -352,4 +352,41 @@ document-scoped token above is a requirement rather than a suggestion.
 
 ## Implementation notes
 
-Left empty at Proposed.
+Shipped as written, with one clause deliberately deferred and two details the
+Decision did not settle.
+
+**The startup line ships without the token name and the `scoped` flag.** The
+Decision says the line carries both. They come from `GET /whoami`, which needs
+an HTTP client, and that client belongs to the `upstream-api` topic and had not
+been built when this shipped. Everything else on the line — the resolved `.env`
+path, the document ID, the parsed state of the destructive flag, and the origin
+of each resolved value — is present. The gap is marked in the docstring of
+`format_startup_line` in `src/superhumandoc_mcp/config.py` so the wave that
+builds the client finds it. This clause was added to the Decision late, during
+the correction that fixed this RFC's claim that `whoami` reports nothing about
+scope, which is why it alone depends on another topic.
+
+**`SHDOC_ENV_FILE` is excluded from the resolved configuration.** It carries the
+`SHDOC_` prefix, so the prefix rule as written would load it and report it
+beside the credentials. It is a locator rather than a setting: by the time it
+could be reported, the file it names has already been read, and setting it
+inside that file does nothing at all. Loading it would have invited a reader to
+treat it as one of the resolved values.
+
+**A disagreement on `SHDOC_ALLOW_DESTRUCTIVE` reports as `restricted`, not as a
+source.** The Decision fixes the resolved value in that case but says nothing
+about how the startup line attributes it. Attribution by ordinary precedence
+names the environment, which is the side that lost whenever the file is the
+restrictive one — so a line reading `destructive tools: off
+[SHDOC_ALLOW_DESTRUCTIVE=environment]` would describe the opposite of what
+happened. Since the line exists to make resolution legible, it now names the
+rule instead.
+
+Shipping this also renamed `SUPERHUMAN_API_TOKEN` and `SUPERHUMAN_DOC_ID` to
+`SHDOC_API_KEY` and `SHDOC_DOC_ID` in `.env.example`, and removed the note in
+`README.md` that promised the rename, both of which the Decision required.
+
+No tools are registered yet, including when the destructive flag parses as
+true. `build_server` reads the flag and registers nothing; the `tool-surface`
+topic's tools are a later wave. The flag's effect is therefore specified and
+tested but not yet observable in the tool list.
