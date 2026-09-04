@@ -175,18 +175,54 @@ on.
 - **`upsert_rows`** — `table_id_or_name`, `rows`, optional `key_columns`.
 - **`update_row`** — `table_id_or_name`, `row_id`, `cells`.
 
+**`content` is markdown.** The API's page-content write takes
+`canvasContent: {format, content}` with `markdown` and `html` both legal, so the
+format is a choice this RFC has to make rather than a given. Markdown is chosen
+because these are element-scoped edits — a paragraph, a heading, a list item —
+where HTML is noise the model must generate correctly for no gain, and because
+markdown is what a model produces naturally.
+
+The choice has one known cost, and the tools state it rather than absorbing it.
+Markdown export omits page-level attachments while HTML export retains them
+(staff-confirmed), so an image cannot survive a markdown write-then-read.
+Accordingly the write tools **reject markdown image syntax with an explicit
+error** instead of creating a block that will vanish from the next read. The one
+production pipeline surveyed chose `html` for exactly this reason, which is the
+right trade for a documentation importer pushing whole pages and the wrong one
+for element-scoped editing.
+
+This is the write format for the tools in this surface, not a claim about which
+format is better in general. If the fidelity tests show markdown mangling
+constructs beyond images, changing the format is a bounded change to a constant
+rather than a supersede — the decision here is that the format is **explicit and
+declared**, not left to whatever the caller happens to send.
+
 ### Gated tools
 
-`delete_page`, `clear_page_content`, `delete_rows`, `push_button`, and
-`overwrite_page` are registered only when `SHDOC_ALLOW_DESTRUCTIVE` is
-**enabled**, which means an explicit affirmative value and not merely a variable
-that exists. RFC 0006 specifies the parser: `SHDOC_ALLOW_DESTRUCTIVE=false`
-leaves these five unregistered, as does any value the parser does not
-recognise.
+These five are registered only when `SHDOC_ALLOW_DESTRUCTIVE` is **enabled**,
+which means an explicit affirmative value and not merely a variable that exists.
+RFC 0006 specifies the parser: `SHDOC_ALLOW_DESTRUCTIVE=false` leaves them
+unregistered, as does any value the parser does not recognise.
+
+- **`delete_page`** — `page_id_or_name`.
+- **`clear_page_content`** — `page_id_or_name`, optional `force`.
+- **`delete_rows`** — `table_id_or_name`, `row_ids`.
+- **`push_button`** — `table_id_or_name`, `row_id`, `column_id_or_name`.
+- **`overwrite_page`** — `page_id_or_name`, `content`, optional `force`.
+  Replaces the entire page. `content` is markdown, as for the always-on write
+  tools.
 
 `push_button` is classified destructive despite deleting nothing, because its
 blast radius is unbounded and cannot be declared in advance. `overwrite_page` is
 whole-page replacement, and is the operation the vendor's warning is about.
+
+`clear_page_content` empties a page while leaving the page itself in place. It
+is whole-page `replace` with an empty payload, which makes it `overwrite_page`
+with the content argument fixed rather than a milder operation — so **it carries
+the same pre-write guard** and the same `force` override. Naming it separately
+is worth the duplication: "clear this page" is a thing a model will try to
+express, and without the tool it would reach for `overwrite_page` with an empty
+string, which is the more dangerous habit to teach.
 
 ### Three safety mechanisms
 
@@ -206,9 +242,12 @@ Splitting keeps the additive operation and the destructive one on separate
 permission surfaces, so an "always allow" on the safe one confers nothing
 dangerous.
 
-**3. `overwrite_page` carries a pre-write guard.** It is the only tool with one.
-Before writing, it lists the document's tables, controls and formulas and filters
-them on `parent.id == pageId` — all three schemas carry a `parent: PageReference`,
+**3. `overwrite_page` and `clear_page_content` carry a pre-write guard.** They
+are the only tools with one, and they have it because they are the only two that
+write over content they did not read — every other write is additive or
+element-scoped. Before writing, the guard lists the document's tables, controls
+and formulas and filters them on `parent.id == pageId` — all three schemas carry
+a `parent: PageReference`,
 which is what makes the check possible. If the page owns any such object the tool
 **refuses** and names what it found. A `force` parameter overrides the refusal.
 The flag governs whether the tool exists; the guard governs whether a particular
@@ -234,9 +273,17 @@ These apply to every tool and are not negotiable per-tool:
   arbitrary row" on collision, for updates and deletes alike.
 - Cell writes send ISO 8601 dates only, and reject writes to calculated and button
   columns before a request is made.
-- Retries are permitted only for GETs and for upserts with `key_columns` set.
-  There are no idempotency keys, and an unkeyed upsert retried after a timeout
-  duplicates rows.
+- **A 429 and a timeout are different failures and are retried differently.** A
+  429 is refused before the request executes, so replaying it is safe on every
+  method, including an unkeyed upsert — nothing happened. A timeout or a
+  connection drop *after* the request was accepted is the dangerous case: the
+  mutation may be in flight, and there are no idempotency keys, so replaying an
+  unkeyed upsert duplicates rows. Retry after acceptance is therefore permitted
+  only for GETs and for upserts with `key_columns` set, while a 429 carries no
+  such restriction. Conflating the two costs correctness in one direction and
+  throughput in the other: treating every 429 as unsafe makes writes fail that
+  never reached the server, and treating every timeout as safe silently
+  duplicates data. The retry budget and backoff are RFC 0008's.
 
 ## Alternatives considered
 
