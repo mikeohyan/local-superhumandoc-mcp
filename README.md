@@ -56,9 +56,6 @@ access rather than read-only — reading a page as markdown begins with a `POST`
 to start an export, so a read-restricted token fails with a 403 that appears to
 contradict its own name.
 
-(`.env.example` in this repository still carries provisional `SUPERHUMAN_*`
-names; the `config-resolution` topic renames them when it ships.)
-
 ### Launch `claude` from the project root
 
 The server resolves its own `.env`, and its primary path is
