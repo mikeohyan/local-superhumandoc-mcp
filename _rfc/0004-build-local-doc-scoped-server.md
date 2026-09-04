@@ -1,9 +1,9 @@
 ---
 rfc: 0004
 title: Build a local doc-scoped MCP server rather than adopting the official or community servers
-status: Proposed
+status: Accepted
 created: 2026-09-03
-decided:
+decided: 2026-09-04
 supersedes:
 superseded_by:
 topic: server-ownership

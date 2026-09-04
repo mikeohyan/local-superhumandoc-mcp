@@ -28,7 +28,7 @@ decision may not yet be accepted.
 | `evidence-location` | 0003 | Implemented | `_rfc/archive/implemented/0003-evidence-and-reference-material.md` |
 | `packaging` | 0007 | Implemented | `_rfc/archive/implemented/0007-packaging-and-distribution.md` |
 | `rfc-process` | 0001 | Implemented | `_rfc/archive/implemented/0001-rfc-process.md` |
-| `server-ownership` | 0004 | Proposed | `_rfc/0004-build-local-doc-scoped-server.md` |
+| `server-ownership` | 0004 | Accepted | `_rfc/0004-build-local-doc-scoped-server.md` |
 | `tool-surface` | 0005 | Accepted | `_rfc/0005-tool-surface-and-write-safety.md` |
 
 ## In flight — `_rfc/`
@@ -37,7 +37,7 @@ Proposed and Accepted: decided or awaiting decision, not yet shipped.
 
 | # | Title | Topic | Status | Decided | Path |
 |---|---|---|---|---|---|
-| 0004 | Build a local doc-scoped MCP server rather than adopting the official or community servers | `server-ownership` | Proposed | — | `_rfc/0004-build-local-doc-scoped-server.md` |
+| 0004 | Build a local doc-scoped MCP server rather than adopting the official or community servers | `server-ownership` | Accepted | 2026-09-04 | `_rfc/0004-build-local-doc-scoped-server.md` |
 | 0005 | Expose element-scoped editing tools and gate destructive operations behind a flag | `tool-surface` | Accepted | 2026-09-04 | `_rfc/0005-tool-surface-and-write-safety.md` |
 | 0006 | Resolve credentials and document scope from a project-local `.env` inside the server | `config-resolution` | Accepted | 2026-09-04 | `_rfc/0006-credential-and-config-resolution.md` |
 | 0008 | Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory | `upstream-api` | Accepted | 2026-09-04 | `_rfc/0008-api-version-lock-and-advisory-rate-limits.md` |
