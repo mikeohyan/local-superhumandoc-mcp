@@ -295,9 +295,9 @@ server's dumped `argv` contained the four-element literal
 `['<probe.py>', '<dump-path>', '--env-file', '${CLAUDE_PROJECT_DIR}/.env']`.
 The placeholder was never substituted; the server would receive the literal
 string `${CLAUDE_PROJECT_DIR}/.env` as its `--env-file` argument, which as a
-path does not exist. **Do not recommend
-`"args": ["--env-file", "${CLAUDE_PROJECT_DIR}/.env"]` in any setup
-instructions** — it silently passes a literal, not a resolved path, and would
+path does not exist. A setup instruction of the form
+`"args": ["--env-file", "${CLAUDE_PROJECT_DIR}/.env"]` therefore passes a
+literal rather than a resolved path, and would
 fail exactly the way the `config-resolution` topic's existing findings predict
 for `${VAR}` expansion of other variables: this failure mode is specific
 neither to Claude Desktop nor to secrets, it reproduces on the plain Claude
@@ -355,50 +355,39 @@ receives, so a `SessionStart` hook cannot be used to detect or correct a wrong
 | Does `${CLAUDE_PROJECT_DIR}` expand in `.mcp.json`'s `args`? | No — passed through as a literal string, both via `--mcp-config` and plain ambient discovery | [OBSERVED] |
 | Can a `SessionStart` hook fire early enough / influence the server's environment? | No — timing is not reliably "before," and there is no channel from a hook to a sibling process's environment | [OBSERVED] + [DOCUMENTED] |
 
-## Recommendation
+## Which resolution candidates survive a subdirectory launch
 
-**Given only what was verified to actually work, the honest answer is:
-instruct users to launch `claude` from the project root, and treat that as a
-convention to state clearly rather than a mechanism the client enforces.**
-Nothing tested here lets a project make `CLAUDE_PROJECT_DIR` reliable from an
-arbitrary subdirectory. Ranked from most to least robust, given what was
-verified:
+Nothing tested here makes `CLAUDE_PROJECT_DIR` resolve to anything other than
+the directory `claude` was launched from. Against the four-candidate `.env`
+resolution order set by the `config-resolution` topic (see `_rfc/README.md`),
+that sorts the candidates as follows.
 
-1. **`--env-file <path>` or `$SHDOC_ENV_FILE` (candidates 1–2 in the
-   `config-resolution` topic), with an absolute path.** The only mechanisms in
-   the existing candidate list that do not depend on the launch directory at
-   all. Since a value in `.mcp.json`'s `env` block is a plain string, not
-   subject to `${VAR}` expansion problems (per A3, no expansion is needed or
-   attempted for a literal absolute path), a project can hardcode
-   `SHDOC_ENV_FILE` to an absolute path in a **local**, gitignored file (e.g.
-   `.mcp.json` at local/user scope, or `.claude/settings.local.json`'s `env`
-   key) — never in the committed project-scope `.mcp.json`, since that value
-   would be the same absolute path for every clone and machine, which defeats
-   portability, and more importantly because a per-machine absolute path
-   baked into a committed file is exactly the brittleness `.env` itself exists
-   to avoid.
-2. **State the launch-directory convention explicitly in the project's
-   setup/README instructions**, e.g. "run `claude` from this project's root
-   directory" — and rely on the server's existing startup stderr log line
-   (already decided in the `config-resolution` topic) as the fast, cheap way
-   a user notices they violated the convention, rather than hitting a
-   confusing auth error several tool calls later.
-3. **Do not rely on `./.env`, candidate 4.** It was already documented as the
-   last-resort, most-fragile candidate; A2 shows directly that it fails in
-   the same subdirectory-launch scenario that breaks `CLAUDE_PROJECT_DIR`,
-   for the same reason — both resolve against the launch `cwd`.
-4. **Do not recommend `${CLAUDE_PROJECT_DIR}` expansion in `.mcp.json`'s
-   `args`** (A3) or a `SessionStart` hook as a safety net (A4) — both were
-   tested and found not to work.
+**Candidates 1 (`--env-file <path>`) and 2 (`$SHDOC_ENV_FILE`)** are the only
+two independent of the launch directory, and only when given an **absolute**
+path. A literal absolute path needs no `${VAR}` expansion, so it is unaffected
+by A3. Placed in the committed project-scope `.mcp.json`, such a path is
+identical for every clone and machine; a local, gitignored location — a local-
+or user-scope registration, or `.claude/settings.local.json` — keeps it
+per-machine.
 
-This doesn't require touching RFC 0006's decision — candidates 1 and 2 already
-exist for exactly this reason, per its own text: "Candidates 1 and 2 are
-escape hatches for clients that set no such variable, and for pointing a
-server at a `.env` outside the project." What changes is that this addendum
-shows the escape hatch is needed more often than "clients that set no such
-variable" implies — it's also needed for a `claude`-launched session with a
-subdirectory-launched working directory, which is a mainstream Claude Code
-usage pattern, not an edge case. Whether to promote `--env-file`/
-`SHDOC_ENV_FILE` from escape hatch to primary recommendation, or to soften the
-`CLAUDE_PROJECT_DIR` candidate's framing, is a design call for the RFC to make
-— not something this reference file should decide.
+**Candidate 3 (`$CLAUDE_PROJECT_DIR/.env`)** resolves correctly only when
+`claude` is launched from the directory holding the `.env`. A2 shows that
+`.mcp.json` discovery walks up to the project root while `CLAUDE_PROJECT_DIR`
+does not, so a subdirectory launch registers the server and then hands it the
+wrong directory.
+
+**Candidate 4 (`./.env`)** fails in the same scenario for the same reason:
+both resolve against the launch `cwd`.
+
+Two mechanisms that might be expected to close the gap do not.
+`${CLAUDE_PROJECT_DIR}` is not expanded inside `.mcp.json`'s `args` (A3), and a
+`SessionStart` hook can neither be relied on to run before MCP spawn nor
+influence a sibling process's environment (A4).
+
+Every failure mode above is silent until an authentication error several tool
+calls later. The startup stderr line naming the resolved `.env` path, already
+decided by the `config-resolution` topic, is what makes a violation observable.
+
+Whether any of this changes the candidate order, or the framing of candidate 3
+as the one that carries normal operation, is a decision for an RFC. This file
+records what was observed and nothing more.
