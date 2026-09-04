@@ -2,7 +2,12 @@
 
 **Date:** 2026-09-03
 **Target:** `https://docs.superhuman.com/apis/v1` (formerly Coda API v1; specs are byte-identical)
-**Status:** NOT YET RUN — see the empty Results section at the bottom.
+**Status:** RUN on 2026-09-04. P1, P2, P3, P4, P5 (a/b/c), P6, and P9 were executed
+(P3/P4 adapted to a canvas-page content write in place of a table-row write, since
+the scratch doc has no table — see Results). P7 and P8 are NOT RUN — both require
+a table with a writable column, which does not exist in the scratch doc. See the
+Results section for raw output and findings, several of which contradict the
+plan's or the constants file's assumptions.
 
 ## What this plan settles
 
@@ -486,55 +491,339 @@ curl -s -H "$H" "$BASE/docs/$DOC/pages/$PAGE/content?limit=500" \
 will want the exact bytes. Note the date and the doc used, since several behaviours
 are doc-size dependent.*
 
-**Run date:**
-**Doc used (size / row count / page count):**
-**Token owner / workspace:**
+**Run date:** 2026-09-04 (the plan above is dated 2026-09-03; execution was the next day)
+**Doc used:** `6vqpBu-VYd` ("MCP Validator"), one page `canvas-4LiD-eeMTK` (`contentType: canvas`, "Untitled page"), **zero tables** (`GET /docs/6vqpBu-VYd/tables` → `{"items":[]}`, confirmed live before running anything). The page started empty; P3/P4/P5/P6 wrote probe content to it, so it ends this run non-empty by design.
+**Token owner / workspace:** Michael Yan, workspace "Prosperzero" (from `GET /whoami`).
+
+**Adaptation note (applies to P3, P4, P7, P8):** the plan's Setup section assumes a `$TABLE`/`$COL` pair. None exists in this scratch doc — confirmed above. P7 and P8 are genuinely NOT RUN (see their sections). P3 and P4 need *some* doc-content write to test staleness/mutation-status against, and the task scope named them as runnable with "only a canvas page," so they were adapted to use the one write operation a canvas page supports: `PUT /docs/{docId}/pages/{pageId}` with `contentUpdate: {insertionMode: "append", canvasContent: {format: "markdown", content: "..."}}` (`PageUpdate`/`PageContentUpdate` schemas, confirmed against a fresh fetch of `https://coda.io/apis/v1/openapi.yaml` this session). This is a doc-content-mutating request that returns a `requestId` via `DocumentMutateResponse`, exactly like a row write would, so `getMutationStatus` polling in P4 still applies unmodified. Every place below that deviates from the plan's literal commands is called out inline.
 
 ## P1 — Authenticated rate-limit headers
 
-_(not yet run)_
+Ran as written: two back-to-back `GET /whoami` with full response headers.
+
+```
+$ curl -s -D - -o /dev/null -H "Authorization: Bearer <token>" "$BASE/whoami"
+HTTP/2 200
+content-type: application/json; charset=utf-8
+content-length: 582
+date: Fri, 04 Sep 2026 00:57:04 GMT
+x-coda-pod: api-d76f7b4cc-rhqsv
+vary: Origin, Accept-Encoding
+surrogate-control: no-store
+cache-control: no-store, no-cache, must-revalidate, proxy-revalidate
+expires: 0
+etag: W/"246-GktliZD5wAvw1ZpwhwE9zIZAeOc"
+x-coda-server: api
+x-cache: Miss from cloudfront
+via: 1.1 e1398ce0772469b7a60133c0332b9d06.cloudfront.net (CloudFront)
+x-amz-cf-pop: YTO53-P1
+alt-svc: h3=":443"; ma=86400
+x-amz-cf-id: zoDgb1UMoLesiHczTraUWEWQN56R4cTu38sUP-a1ihAt-ix1kxN6hQ==
+strict-transport-security: max-age=63072000; includeSubDomains; preload
+
+$ curl -s -D - -o /dev/null -H "Authorization: Bearer <token>" "$BASE/whoami"
+HTTP/2 200
+...
+x-coda-pod: api-d76f7b4cc-t4dtb
+...
+```
+
+**Result: no `Retry-After` or `X-RateLimit-*` header on a successful authenticated response.** Confirms the expected outcome — the client has no server-side feedback channel on 2xx responses and must self-throttle. `x-coda-pod` differed between the two consecutive requests (`rhqsv` vs `t4dtb`), confirming no request affinity across the pod fleet, consistent with the replication-lag mechanism P4/P5 measure.
 
 ## P2 — `X-Coda-Doc-Version` value handling
 
-_(not yet run)_
+Ran 2a/2b/2c as written, then added confirmation re-runs (same class of request, no bucket abuse) because the result was unexpected and worth reproducing before trusting it.
+
+```
+$ curl -s -o /dev/null -w "quiet+header:  %{http_code}\n" -H "$H" -H "X-Coda-Doc-Version: latest" "$BASE/docs/$DOC/tables"
+quiet+header:  200
+
+$ curl -s -w "\nbogus-value:   %{http_code}\n" -H "$H" -H "X-Coda-Doc-Version: 12345" "$BASE/docs/$DOC/tables"
+{"statusCode":400,"statusMessage":"Bad Request","message":"Doc is not yet up to date."}
+bogus-value:   400
+
+$ curl -s -o /dev/null -w "empty-value:   %{http_code}\n" -H "$H" -H "X-Coda-Doc-Version: " "$BASE/docs/$DOC/tables"
+empty-value:   200
+```
+
+Reproduced the bogus-value case three more times across ~2 minutes, on two different endpoints, before and after P3's write:
+
+```
+header=latest  (tables, before write)  -> 200
+header=12345   (tables, before write)  -> 400 {"statusCode":400,"statusMessage":"Bad Request","message":"Doc is not yet up to date."}
+header=<none>  (tables, before write)  -> 200
+header=12345   (page GET, after write) -> 400 {"statusCode":400,"statusMessage":"Bad Request","message":"Doc is not yet up to date."}
+header=latest  (tables, after write)   -> 200
+header=12345   (tables, after write)   -> 400 {"statusCode":400,"statusMessage":"Bad Request","message":"Doc is not yet up to date."}
+```
+
+**Result — deviates from every outcome the plan anticipated.** The header is not parsed leniently (2b/2c would then all be 200) and it is not schema-validated as a malformed request either (that shape is different — see P3 below). Instead: **any value other than the literal string `latest` (empty and omitted both count as "no header," and pass) deterministically produces a 400 with `message: "Doc is not yet up to date."`, regardless of whether a real pending mutation exists.** We reproduced this before any write had ever been made in the session, i.e. with no plausible staleness condition. This strongly suggests the header is checked for exact equality against `"latest"` and anything else takes the "not current" branch unconditionally, rather than being validated as an opaque token or ignored. **Consequence for P3's discriminator:** the message text `"Doc is not yet up to date."` cannot be trusted as evidence of genuine staleness — it is also what an arbitrary invalid value produces. See P3.
 
 ## P3 — Staleness 400: fires? message text? control case?
 
-_(not yet run)_
+**Write (adapted — no table exists; see Adaptation note above):**
+
+```
+$ curl -s -X PUT -H "$H" -H "Content-Type: application/json" \
+  -d '{"contentUpdate":{"insertionMode":"append","canvasContent":{"format":"markdown","content":"probe-1757033824"}}}' \
+  "$BASE/docs/$DOC/pages/$PAGE"
+202
+{"id":"canvas-4LiD-eeMTK","requestId":"mutate:d2149ec0-e6b1-4ffb-afc4-e118484259ed"}
+```
+
+**Staleness read loop** (adapted target: `GET /docs/{docId}/pages/{pageId}` with `X-Coda-Doc-Version: latest`, since there is no rows endpoint to poll; 10 attempts, 1s apart, immediately after the write above):
+
+```
+attempt 1 -> 200
+attempt 2 -> 200
+attempt 3 -> 200
+attempt 4 -> 200
+attempt 5 -> 200
+attempt 6 -> 200
+attempt 7 -> 200
+attempt 8 -> 200
+attempt 9 -> 200
+attempt 10 -> 200
+```
+
+All ten returned 200. **No staleness 400 fired as a consequence of our own write, on this scratch doc, within the ~10 s window tested.** This matches the plan's "all ten attempts return 200 → the header is effectively inert on this account and workload" outcome — with the caveat from P2 that we cannot conclude the header is inert in general, only that it never fired due to an actual pending mutation in this session.
+
+**Control case — NOT RUN as specified.** The plan's control (`sortBy=natural&visibleOnly=false` against `$TABLE/rows`) requires a table; none exists. **Blocked part: the specific documented-unsatisfiable-combination request, which only exists on the rows/listRows endpoint.**
+
+**Adapted control performed instead**, using a genuinely invalid enum value against a real docs-domain endpoint (`listPageContent`'s `contentFormat`, whose spec declares exactly one legal value, `plainText`):
+
+```
+$ curl -s -H "$H" -H "X-Coda-Doc-Version: latest" "$BASE/docs/$DOC/pages/$PAGE/content?contentFormat=bogusFormat"
+{"statusCode":400,"statusMessage":"Bad Request","message":"Bad Request","codaType":"RequestSchemaValidationFailed","codaDetail":{"issues":[{"code":"invalid_union","errors":[[{"code":"invalid_value","values":["plainText"],"path":["contentFormat"],"message":"Invalid input: expected \"plainText\""}],[{"expected":"string","code":"invalid_type","path":["pageToken"],"message":"Invalid input: expected string, received undefined"},{"code":"unrecognized_keys","keys":["contentFormat"],"path":[],"message":"Unrecognized key: \"contentFormat\""}]],"path":[],"message":"Invalid input"}]}}
+code=400
+
+$ curl -s -H "$H" "$BASE/docs/$DOC/pages/$PAGE/content?contentFormat=bogusFormat"
+(byte-identical body to the above)
+code=400
+```
+
+**Result: the two 400 shapes ARE distinguishable, contrary to the constants file's §2.1 claim that they are "byte-identical in shape on every docs endpoint."** A real schema-validation 400 on `listPageContent` carries `codaType: "RequestSchemaValidationFailed"` and `codaDetail.issues`; the header-triggered 400 from P2 (`"message":"Doc is not yet up to date."`) carries neither. With-header and without-header requests produced byte-identical malformed-request bodies, confirming request validation runs independent of the freshness header (the negative control holds). **This also refutes the constants file's claim that no docs/rows/pages/tables/columns operation uses the `BadRequestWithValidationErrors` shape** — `listPageContent` demonstrably does, live, 2026-09-04.
+
+**Net verdict for P3:** the genuine staleness 400 was never observed as a consequence of an actual pending mutation. The 400 that *is* reliably produced by the header comes from any non-`latest` value, and its message ("Doc is not yet up to date.") should not be assumed to be the real staleness message without testing on a larger/busier doc where a genuine pending-mutation condition can be created.
 
 ## P4 — `getMutationStatus` 404 window
 
-_(not yet run)_
+**First attempt was contaminated:** P4 originally reused P3's write, but the P2/P3 investigation above consumed roughly 90+ seconds before the first `mutationStatus` poll, so every poll (t=2s..12s of *that* loop, really ~92-102s post-write) returned `{"completed":true,"warning":null}` immediately — this does not measure the replication window and is recorded only for completeness:
+
+```
+requestId=mutate:d2149ec0-e6b1-4ffb-afc4-e118484259ed
+t= 2s -> 200 {"completed":true,"warning":null}   (× 6, all identical)
+```
+
+**Re-ran cleanly** with a fresh write and an immediate (t=0) first poll:
+
+```
+$ curl -s -X PUT ... (fresh append)
+202 {"id":"canvas-4LiD-eeMTK","requestId":"mutate:05cbce66-bb2d-4f0d-8efa-ec469672bcc3"}
+
+$ curl -s "$BASE/mutationStatus/mutate:05cbce66-..."   # t=0, immediately after the 202
+200 {"completed":false}
+
+t= 2s -> 200 {"completed":false,"warning":null}
+t= 4s -> 200 {"completed":false,"warning":null}
+t= 6s -> 200 {"completed":false,"warning":null}
+t= 8s -> 200 {"completed":false,"warning":null}
+t=10s -> 200 {"completed":false,"warning":null}
+t=12s -> 200 {"completed":false,"warning":null}
+t=14s -> 200 {"completed":false,"warning":null}
+t=16s -> 200 {"completed":false,"warning":null}
+t=18s -> 200 {"completed":true,"warning":null}
+t=20s -> 200 {"completed":true,"warning":null}
+t=22s -> 200 {"completed":true,"warning":null}
+t=24s -> 200 {"completed":true,"warning":null}
+```
+
+**Result: no 404 was observed in either run, at any point, including t=0 immediately after the write.** The endpoint consistently returned 200 with `completed:false` until the mutation actually landed. Real completion time on this near-empty scratch doc was between 16 s and 18 s after the write — **slower than staff's "maybe a few seconds" framing for the 404 race (which didn't reproduce at all) but well inside `MUTATION_DEADLINE_S` (60 s).** This is a genuinely different failure mode than what the plan anticipated: the risk isn't a spurious 404 immediately after writing, it's that `completed` legitimately stays `false` for ~18 s even on a trivial doc.
 
 ## P5a — Export replication window and status value
 
-_(not yet run)_
+Ran as written.
+
+```
+$ curl -s -X POST -H "$H" -H "Content-Type: application/json" -d '{"outputFormat":"markdown"}' "$BASE/docs/$DOC/pages/$PAGE/export"
+202
+{"id":"96672a79-d8d3-49a9-93f2-d84992610460","status":"inProgress","href":"https://docs.superhuman.com/apis/v1/docs/6vqpBu-VYd/pages/canvas-4LiD-eeMTK/export/96672a79-d8d3-49a9-93f2-d84992610460"}
+
+t= 2s -> 200 status=complete link=yes err=-
+t= 4s -> 200 status=complete link=yes err=-
+t= 6s -> 200 status=complete link=yes err=-
+t= 8s -> 200 status=complete link=yes err=-
+t=10s -> 200 status=complete link=yes err=-
+t=12s -> 200 status=complete link=yes err=-
+t=14s -> 200 status=complete link=yes err=-
+t=16s -> 200 status=complete link=yes err=-
+```
+
+**Results:**
+- **Begin-response `status` was `"inProgress"`, not `"complete"`** — confirms the constants file's skepticism that the spec's own `example: complete` on the begin response is wrong.
+- **No 404 at any point**, including the very first poll at t=2s — the export was already `complete` with a `downloadLink` by then. `EXPORT_INITIAL_SLEEP_S = 2.0` was sufficient in this case; we cannot say whether it would be on a larger doc.
+- **Completed `status` value was `"complete"`**, matching the enum and staff prose, not `"completed"` as the spec's own contradictory code samples print. Confirms existing guidance to accept `complete` and treat `status` as advisory only.
 
 ## P5b — `downloadLink` lifetime
 
-_(not yet run)_
+Started the unattended 12×30s watch immediately after P5a produced a `downloadLink`, running in the background while P5c/P6/P9 were executed. **Independent corroboration found immediately, without waiting:** the signed S3 URL itself carries `X-Amz-Date=20260904T010143Z` and `X-Amz-Expires=300` as literal query parameters — i.e. the server itself asserts a 300-second validity window at mint time, which corroborates `EXPORT_LINK_TTL_S = 300` [STAFF] independently of staff prose.
+
+_(Background watch result appended below once the task completes — see note at end of this section.)_
+
+**Watch result (background task completed):**
+
+```
+t= 30s -> http=200 bytes=57  (gzip content, decompresses to the 3 probe lines)
+t= 60s -> http=200 bytes=57
+t= 90s -> http=200 bytes=57
+t=120s -> http=200 bytes=57
+t=150s -> http=200 bytes=57
+t=180s -> http=200 bytes=57
+t=210s -> http=200 bytes=57
+t=240s -> http=200 bytes=57
+t=270s -> http=200 bytes=57
+t=300s -> http=200 bytes=57
+t=330s -> http=403 bytes=367 <?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>...
+t=360s -> http=403 bytes=387 <?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>...
+```
+
+**Result: still valid at t=300s, expired by t=330s.** This lands squarely on the `X-Amz-Expires=300` value asserted by the URL itself — **`EXPORT_LINK_TTL_S = 300` is confirmed by direct observation**, not just staff prose. **One correction to the constants file's documented failure shape:** the expired-link response here was **HTTP 403 with `<Code>AccessDenied</Code>`**, not the HTTP-200-with-`<Code>NoSuchKey</Code>` shape the constants file documents (from a 2023 Coda-bug report). Both are XML in the response body starting with `<?xml`, so the existing `looks_like_s3_error()` body-sniffing guard (checking for `<?xml` / matching on body content, not on status code) still catches this case — but a naive client that only checked `status != 200` would actually have caught *this* instance (403 is unambiguous), while the `NoSuchKey`-on-200 case documented previously would not be. Both failure shapes should be treated as fatal-for-this-link and trigger a re-GET of the status endpoint.
 
 ## P5c — Subpages and `contentType` precondition
 
-_(not yet run)_
+```
+$ curl -s -H "$H" "$BASE/docs/$DOC/pages?limit=50" | jq -r '.items[] | "\(.id)\t\(.contentType)\t\(.name)\tparent=\(.parent.id // "-")"'
+canvas-4LiD-eeMTK	canvas	Untitled page	parent=-
+```
+
+Single page, `contentType: canvas`, no parent, no children — matches the target-state description exactly. **No subpages and no non-`canvas` page exist in this doc, so the "no subpage content appears" and "non-canvas pages 400 on export" claims could not be tested here** — that requires a doc structure this scratch doc does not have. Recorded as a target-state limitation, not a probe failure. The exported markdown from P5a contained exactly the three probe lines written by P3/P4/P6's writes and nothing else, consistent with "no subpage content."
 
 ## P6 — Export bucket, and 429 headers
 
-_(not yet run)_
+Ran exactly as written — 6 requests, no more.
+
+```
+export POST 1 -> 202  {"id":"57c1ecb0-...","status":"inProgress",...}
+export POST 2 -> 202  {"id":"fbbbdd6b-...","status":"inProgress",...}
+export POST 3 -> 202  {"id":"3d06cf55-...","status":"inProgress",...}
+export POST 4 -> 202  {"id":"b5051ac6-...","status":"inProgress",...}
+export POST 5 -> 202  {"id":"aa924e58-...","status":"inProgress",...}
+export POST 6 -> 202  {"id":"df71aaf7-...","status":"inProgress",...}
+
+=== headers of last response ===
+HTTP/2 202
+content-type: application/json; charset=utf-8
+content-length: 196
+date: Fri, 04 Sep 2026 01:04:46 GMT
+x-coda-pod: api-doc-7b76d879df-pdd7b
+x-coda-server: api-doc
+... (no ratelimit/retry-after headers)
+
+=== any rate-limit headers? ===
+NONE
+```
+
+**Result: all six requests, fired back-to-back (sub-2-second wall time for the whole loop), returned 202. Zero 429s. No `Retry-After` or `X-RateLimit-*` headers appeared (none were expected to, since no 429 occurred).**
+
+This directly contradicts the assumption in `_rfc/0008-...` and the constants file that export shares the tight doc-content-write bucket (3 or 5 per 10 s): six requests in under two seconds is well over both published figures for that bucket, and none were throttled. **The `Retry-After` question remains empirically UNRESOLVED** — a real 429 was never provoked anywhere in this entire session (P1 through P9), and the plan's ethical bound (exactly 6 requests, not extended) was insufficient to reach one here. Per the rules, no further requests were sent to try to force a 429.
+
+**Incidental finding:** the export POST's response headers show `x-coda-server: api-doc` and pod names prefixed `api-doc-...`, distinct from `x-coda-server: api` / `api-...` seen on `/whoami` and `/docs/{docId}/tables` in P1/P2. Export traffic is served by a visibly separate backend pod class. This is consistent with (though does not prove) export using a rate-limit bucket separate from the doc-content-write bucket used by table/page mutations.
+
+No 429 occurred, so the 60-second wait rule was not triggered.
 
 ## P7 — Row-size inflation factor
 
-_(not yet run)_
+**NOT RUN — requires a table with a writable column; none exists in the scratch doc.** The scratch doc `6vqpBu-VYd` has zero tables (`GET /docs/6vqpBu-VYd/tables` → `{"items":[]}`, confirmed in Setup). P7's write targets `$TABLE/rows`, which has no analogue on a canvas page — appending large markdown strings to the page would test page-content size limits, not row size limits, and would not calibrate `ROW_INFLATION_FACTOR`. Not attempted, to avoid recording a number that answers a different question than the one asked.
 
-## P8 — Sync-token deletion reporting *(only if reconsidering sync tokens)*
+## P8 — Sync-token deletion reporting
 
-_(not yet run)_
+**NOT RUN — requires deleting a row from a table; no table exists in the scratch doc.** Also out of scope per the task's explicit skip list. Not attempted.
 
 ## P9 — Synchronous page-content read
 
-_(not yet run)_
+Ran as written.
+
+```
+$ curl -s -H "$H" "$BASE/docs/$DOC/pages/$PAGE/content?limit=500" | jq '{n:(.items|length), hasNext:(.nextPageToken!=null), sample:(.items[0])}'
+{
+  "n": 4,
+  "hasNext": false,
+  "sample": {
+    "id": "cl-_LhGBxzGdr",
+    "type": "line",
+    "itemContent": {
+      "style": "paragraph",
+      "format": "plainText",
+      "content": "",
+      "lineLevel": 0
+    }
+  }
+}
+```
+
+Running the plan's own second jq expression (`.style // "-"`, `.lineLevel // 0`, `.itemContent // ""`) against the same response:
+
+```
+-	0	{"style":"paragraph","format":"plainText","content":"","lineLevel":0}
+-	0	{"style":"paragraph","format":"plainText","content":"probe-1788469474","lineLevel":0}
+-	0	{"style":"paragraph","format":"plainText","content":"probe-1757033824","lineLevel":0}
+-	0	{"style":"paragraph","format":"plainText","content":"probe-p4-clean","lineLevel":0}
+```
+
+**Result — schema shape differs from what the plan (and the constants file) assumed.** `style` and `lineLevel` are not top-level fields on each item; they are nested one level down inside `itemContent`, alongside `format` and `content`. The plan's own jq expression, written against the assumed flat shape, prints `-`, `0`, and the raw nested object instead of real text for every row — reproduced verbatim above as the actual (not summarized) output. The correct paths are `.itemContent.style`, `.itemContent.lineLevel`, `.itemContent.content`.
+
+Element `id`s are present and look stable (`cl-` prefixed, one per line). All 4 lines were returned in one page (`hasNext: false`, `limit=500` well above the 4 actual lines). Plain text content for the 3 non-empty lines matched the P5a markdown export exactly, byte-for-byte — but all three lines were plain ASCII probe strings with no formatting, so this run cannot speak to how much formatting-fidelity plaintext loses versus markdown; that needs richer content, which is out of scope for this scratch doc.
 
 ## Constants to update in `docs/reference/api-operational-constants.md`
 
-_(list each constant whose marker changes from [CHOSEN — no evidence, tune later]
-to an evidenced value, with its new value and the probe that established it)_
+Each item below is a factual addition (what was observed, dated 2026-09-04) — none
+of them changes a recommended `Value` in the constants table. Where evidence
+conflicts with an existing `[CHOSEN — no evidence, tune later]` recommendation,
+the conflict is stated as fact; the number itself is left for an RFC-owning
+session to revisit, per the evidence-file convention.
+
+1. **`EXPORT_BUCKET`** (§1.4 table + §2.5 prose) — established by P6. Add: six
+   export POSTs fired in under 2 seconds all returned 202, zero 429s — inconsistent
+   with `EXPORT_BUCKET = BUCKET_DOC_CONTENT_WRITE` at either published doc-content
+   rate (3/10s or 5/10s). Also add the `x-coda-server: api-doc` / `api-doc-*` pod
+   detail from the same probe — export traffic is served by a visibly distinct
+   backend pod class from `api`/`api-*`, which served every other endpoint touched
+   in this session.
+2. **`RETRY_AFTER_TRUSTED`** (§1.1 + §2.2) — established by P6 (negative result).
+   Add: a live attempt to provoke a real 429 (P6, the ethically-bounded maximum of
+   6 requests) did not succeed — all six requests returned 202. Whether a genuine
+   429 carries `Retry-After` remains empirically unanswered; the existing
+   spec-reading-based evidence for `False` is unchanged and uncontradicted.
+3. **`MUTATION_404_GRACE_S` / `MUTATION_INITIAL_SLEEP_S` / `MUTATION_DEADLINE_S`**
+   (§1.3 + §2.1) — established by P4. Add: two independent write→poll sequences on
+   this scratch doc never produced a 404 from `getMutationStatus`, including at
+   t=0 immediately after the write. `completed` legitimately stayed `false` until
+   16-18 seconds after the write. The known 404-replication race did not reproduce
+   on this doc; the real bottleneck observed was completion latency, not a 404
+   window.
+4. **`EXPORT_LINK_TTL_S`** (§1.4 + §2.5) — established by P5a/P5b. Add: directly
+   observed download-link validity — HTTP 200 through t=300s, HTTP 403 by t=330s.
+   Corroborates 300s independent of staff prose. Also correct the documented
+   failure shape: the expired-link response observed here was **403 with
+   `<Code>AccessDenied</Code>`**, not the previously-documented 200-with-
+   `<Code>NoSuchKey</Code>` shape — both are `<?xml`-prefixed bodies, so the
+   existing body-sniffing guard still catches both, but note the shape is not
+   fixed to one specific S3 error code or status.
+5. **Export status wire values** (§3.1) — established by P5a. Add: begin-response
+   `status` observed as `"inProgress"` (not the spec example's `"complete"`);
+   completed-response `status` observed as `"complete"` (not `"completed"`).
+6. **`listPageContent` response shape** (§2.5, "A synchronous alternative..."
+   section) — established by P9. Correct the description: `style`, `format`,
+   `content`, and `lineLevel` are **not** top-level fields on each content item —
+   they are nested one level down under `item.itemContent`. The current prose
+   ("each with a stable element `id`, a `style`... and a `lineLevel`") reads as
+   flat and should say so nests under `itemContent`.
+7. **§2.1, "The 400 cannot be distinguished by shape"** — established by P2/P3.
+   Add two findings: (a) live evidence that `listPageContent` **does** return the
+   `BadRequestWithValidationErrors`-shaped 400 (`codaType`, `codaDetail.issues`)
+   for a real schema violation, contradicting the claim that no docs/rows/pages/
+   tables/columns operation uses that shape; (b) `X-Coda-Doc-Version` was found to
+   reject *any* non-`latest`, non-empty value with `400 {"message":"Doc is not yet
+   up to date."}`, deterministically and reproducibly, even with no plausible
+   pending mutation — meaning that exact message text cannot be assumed to be the
+   genuine staleness message; it is also what an invalid header value produces.
