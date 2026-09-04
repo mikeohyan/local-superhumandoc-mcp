@@ -44,6 +44,15 @@ Worth reading first:
 
 Those are topics, not filenames. The index resolves each to its current RFC.
 
+## Evidence and reference material
+
+Decisions in `_rfc/` rest on evidence kept separately, in
+[`docs/`](docs/): `docs/reference/` holds distilled findings, and
+`docs/validation/` holds runnable test plans with their results. Files there
+are mutable and unversioned, and nothing in `docs/` is authoritative for a
+decision — only an RFC can turn a finding into a choice. See the
+`evidence-location` topic.
+
 ## Working in this repository with Claude Code
 
 `CLAUDE.md` carries the rules that apply to every session, and
