@@ -132,8 +132,9 @@ given button does before it is pressed.
 ## Decision
 
 The server exposes **seventeen tools: twelve registered always, five registered
-only when `SHDOC_ALLOW_DESTRUCTIVE` is set.** The always-on editing vocabulary is
-element-scoped, matching the shape the vendor's own server settled on.
+only when `SHDOC_ALLOW_DESTRUCTIVE` is enabled.** The always-on editing
+vocabulary is element-scoped, matching the shape the vendor's own server settled
+on.
 
 ### Always-on read tools
 
@@ -177,7 +178,11 @@ element-scoped, matching the shape the vendor's own server settled on.
 ### Gated tools
 
 `delete_page`, `clear_page_content`, `delete_rows`, `push_button`, and
-`overwrite_page` are registered only when `SHDOC_ALLOW_DESTRUCTIVE` is set.
+`overwrite_page` are registered only when `SHDOC_ALLOW_DESTRUCTIVE` is
+**enabled**, which means an explicit affirmative value and not merely a variable
+that exists. RFC 0006 specifies the parser: `SHDOC_ALLOW_DESTRUCTIVE=false`
+leaves these five unregistered, as does any value the parser does not
+recognise.
 
 `push_button` is classified destructive despite deleting nothing, because its
 blast radius is unbounded and cannot be declared in advance. `overwrite_page` is

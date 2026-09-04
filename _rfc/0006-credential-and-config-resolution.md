@@ -114,9 +114,29 @@ Every variable carries the `SHDOC_` prefix.
 | --- | --- | --- |
 | `SHDOC_API_KEY` | yes | Superhuman Docs API token, sent as `Authorization: Bearer <token>` per RFC 0008. |
 | `SHDOC_DOC_ID` | yes | The single document this server instance is bound to. Every tool operates within it. |
-| `SHDOC_ALLOW_DESTRUCTIVE` | no | When truthy, destructive tools are registered. Default off. What it gates, and why gating happens at registration rather than at call time, is specified in RFC 0005. |
+| `SHDOC_ALLOW_DESTRUCTIVE` | no | Registers the destructive tools, but only on an explicit affirmative value — see the parser below. Default off. What it gates, and why gating happens at registration rather than at call time, is specified in RFC 0005. |
 | `SHDOC_ENV_FILE` | no | Explicit path to the `.env` file; candidate 2 above. |
 | `SHDOC_LOG_LEVEL` | no | Verbosity of stderr diagnostics. |
+
+**`SHDOC_ALLOW_DESTRUCTIVE` is parsed as an explicit affirmative, not as a set
+variable and not as Python truthiness.** The value is stripped of surrounding
+whitespace and lowercased; the tools are registered if and only if the result is
+one of `1`, `true`, `yes`, `on`. Every other value leaves them unregistered —
+unset, empty, `0`, `false`, `no`, `off`, and **any unrecognised string**.
+
+The distinction is load-bearing rather than pedantic, and this RFC states it
+because two plausible readings disagree exactly where it is most dangerous.
+"Set" would register whole-page overwrite and `push_button` for
+`SHDOC_ALLOW_DESTRUCTIVE=false`, which is the opposite of what anyone writing
+that line intends. Python truthiness on the raw string does the same, since any
+non-empty string is truthy. Both readings turn an attempt to disable the
+destructive surface into the act of enabling it.
+
+Unrecognised values fail closed for the same reason. A typo must not arm a
+destructive tool, and there is nothing to gain by guessing what a value like
+`maybe` was meant to say. The server logs the parsed result at startup beside the
+resolved `.env` path, so a user who expected the tools and does not see them has
+one line to read rather than a missing-tool mystery.
 
 These names supersede the provisional `SUPERHUMAN_API_TOKEN` and
 `SUPERHUMAN_DOC_ID` placeholders currently in `.env.example`, which that file
