@@ -155,9 +155,10 @@ and deferred the rest to this wave. Ten rules follow.
    model, which RFC 0004 says this server exists to absorb, and which RFC 0004
    already applies to pagination for the same reason.
 
-2. **Page-content writes are refused above the cap, never split.** The caller of
-   `upsert_rows` has already partitioned their input: rule 6 can report by
-   position because the positions are the caller's own. The caller of
+2. **Page-content writes are refused above the cap, never split.** The callers of
+   `upsert_rows` and `delete_rows` have already partitioned their input: rule 6
+   can report by position because the positions are the caller's own, and a row
+   ID handed to `delete_rows` is a stronger handle still. The caller of
    `append_to_page` passes one string, so the client would have to invent the
    partition and then report progress against boundaries the caller never chose
    and cannot address — RFC 0005's write tools have no vocabulary for "resume
@@ -431,12 +432,17 @@ individually oversized never reaches the halving at all: each such row is alread
 alone in its chunk, so it costs one round trip, not a binary-tree search. Rule 4's
 recursion is reserved for the case the estimate got wrong, which is rarer and
 genuinely logarithmic in the chunk. What binds either case is arithmetic rather
-than a rule. Row writes draw on the doc-content bucket, the tightest in the API at
-two per ten seconds, and the deadline leaves eighty seconds after its reserved
-tail, so a tool call affords about sixteen of them however they are spent. The
-honest description of a pathological batch is that it spends its whole deadline
-discovering oversized rows one at a time and reports most of itself *not
-attempted* — slow and truthful rather than fast and wrong. Rule 9 is worse: a 504 late in a large listing
+than a rule, and the two paths are bound by different arithmetic. A chunk that is
+*applied* costs a write plus a poll to completion, which probe P4 puts at sixteen
+to eighteen seconds, so about four of those fit in the eighty seconds the deadline
+leaves after its reserved tail. A chunk *refused* for size costs one round trip
+and no poll at all, so what limits those is admission to the doc-content bucket at
+two per ten seconds — about sixteen in the same budget. Rule 7 needs no special
+case for this because it tests the time actually remaining rather than a running
+tally: a fast refusal returns almost all of the budget, and the next check passes
+again on its own. The honest description of a pathological batch is that it spends
+its whole deadline discovering oversized rows one at a time and reports most of
+itself *not attempted* — slow and truthful rather than fast and wrong. Rule 9 is worse: a 504 late in a large listing
 discards everything paged so far, because the token cannot carry a new page
 size, so the cost of shrinking grows with how far the listing got.
 
