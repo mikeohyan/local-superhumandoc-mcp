@@ -1,9 +1,9 @@
 ---
 rfc: 0011
 title: Split oversized batches rather than refusing them, and answer a size refusal by asking for less
-status: Proposed
+status: Accepted
 created: 2026-09-04
-decided:
+decided: 2026-09-05
 supersedes:
 superseded_by:
 topic: request-sizing

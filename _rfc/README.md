@@ -28,7 +28,7 @@ decision may not yet be accepted.
 | `evidence-location` | 0003 | Implemented | `_rfc/archive/implemented/0003-evidence-and-reference-material.md` |
 | `failure-policy` | 0010 | Implemented | `_rfc/archive/implemented/0010-failure-classification-and-retry-policy.md` |
 | `packaging` | 0007 | Implemented | `_rfc/archive/implemented/0007-packaging-and-distribution.md` |
-| `request-sizing` | 0011 | Proposed | `_rfc/0011-request-sizing-and-batch-splitting.md` |
+| `request-sizing` | 0011 | Accepted | `_rfc/0011-request-sizing-and-batch-splitting.md` |
 | `rfc-process` | 0001 | Implemented | `_rfc/archive/implemented/0001-rfc-process.md` |
 | `server-ownership` | 0004 | Implemented | `_rfc/archive/implemented/0004-build-local-doc-scoped-server.md` |
 | `tool-surface` | 0005 | Accepted | `_rfc/0005-tool-surface-and-write-safety.md` |
@@ -40,7 +40,7 @@ Proposed and Accepted: decided or awaiting decision, not yet shipped.
 | # | Title | Topic | Status | Decided | Path |
 |---|---|---|---|---|---|
 | 0005 | Expose element-scoped editing tools and gate destructive operations behind a flag | `tool-surface` | Accepted | 2026-09-04 | `_rfc/0005-tool-surface-and-write-safety.md` |
-| 0011 | Split oversized batches rather than refusing them, and answer a size refusal by asking for less | `request-sizing` | Proposed | — | `_rfc/0011-request-sizing-and-batch-splitting.md` |
+| 0011 | Split oversized batches rather than refusing them, and answer a size refusal by asking for less | `request-sizing` | Accepted | 2026-09-05 | `_rfc/0011-request-sizing-and-batch-splitting.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
