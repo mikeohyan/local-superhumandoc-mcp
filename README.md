@@ -5,9 +5,12 @@ Claude and Claude Code. Written in Python, managed with `uv`, and intended to be
 set up per project folder: each project points the server at its own document
 and supplies its own credentials through a local `.env`.
 
-**Status: no implementation yet.** The repository currently holds the decision
-record and project conventions. The API surface has been pinned, but no client
-code has been written.
+**Status: the server runs, and registers no tools yet.** Credential and config
+resolution, the HTTP client with its throttling, retry and failure-classification
+policy, and the server factory are implemented and tested. What is missing is the
+tool surface — the `tool-surface` and `request-sizing` topics are decided but not
+yet shipped — so a client that connects completes the handshake and finds nothing
+to call.
 
 ## Setup
 
@@ -25,10 +28,13 @@ project that *uses* it is below.
 
 ## Installing in a project
 
-**Not yet available** — there is no implementation, so nothing here runs
-today. This records the shape decided by the `config-resolution` and
-`packaging` topics, and the one operational requirement that is easy to get
-wrong.
+**Not yet useful** — the package builds and the console script serves MCP over
+stdio, but the server registers no tools until the `tool-surface` topic ships,
+so there is nothing for a model to call. The `@v0.1.0` in the example below is
+also not yet reachable: this repository carries no version tag, and the pinned-tag
+install was verified against a scratch copy rather than against this one. What
+follows is the shape decided by the `config-resolution` and `packaging` topics,
+and the one operational requirement that is easy to get wrong.
 
 A consuming project commits a `.mcp.json` carrying no secrets:
 
@@ -48,7 +54,9 @@ A consuming project commits a `.mcp.json` carrying no secrets:
 }
 ```
 
-Beside it sits a gitignored `.env` holding `SHDOC_API_KEY` and `SHDOC_DOC_ID`.
+Beside it sits a gitignored `.env` holding `SHDOC_API_KEY` and `SHDOC_DOC_ID`,
+plus the optional keys documented in [`.env.example`](.env.example), which is
+the list to read rather than this paragraph.
 Scope the API token to that single document when you create it: the server is
 bound to one document anyway, and a workspace-wide token would give every
 project's server access to every other project's documents. Give it write
