@@ -23,6 +23,19 @@ token in UUID form; see the `upstream-api` topic in
 [`_rfc/README.md`](_rfc/README.md) for the authentication scheme, the pinned API
 version, and why the published rate limits are treated as advisory.
 
+Then, to work on the server itself:
+
+```bash
+uv sync                                   # including the dev group
+uv run pytest                             # the test suite
+uv run superhumandoc-mcp --env-file "$PWD/.env"
+```
+
+The last command serves MCP over stdio, so it will sit waiting on a client
+rather than printing and exiting. It logs the `.env` path it resolved to stderr
+at startup, which is the quickest check that configuration resolved the way you
+expected.
+
 That covers working on the server in this repository. Installing it into a
 project that *uses* it is below.
 
@@ -74,10 +87,9 @@ server correctly and then hands it the wrong directory. The `.env` is never
 found, and the first symptom is a confusing authentication error several tool
 calls later.
 
-Nothing in the client prevents this. `--add-dir` does not affect the variable,
-a value preset in your shell is overwritten, `${CLAUDE_PROJECT_DIR}` is passed
-through literally inside `.mcp.json`'s `args`, and a `SessionStart` hook cannot
-reach the spawned server's environment. The convention is the mechanism.
+Nothing in the client prevents this, and the obvious workarounds were each tested
+and each fail — see `docs/reference/mcp-client-environment.md` for what was tried
+and what it did. The convention is the mechanism.
 
 If a project cannot guarantee its launch directory, pass an **absolute** path
 instead, through `--env-file` or `SHDOC_ENV_FILE`, and put it in a local,
@@ -93,11 +105,8 @@ Every architectural decision in this repository is recorded as an RFC under
 [`_rfc/`](_rfc/README.md). Start with that index — it lists each decision, its
 status, and its path.
 
-Decisions that are still true are split across two directories: `_rfc/` holds
-what has been decided but not yet shipped, and `_rfc/archive/implemented/` holds
-what has shipped and remains current. `_rfc/archive/retired/` is history only.
-
-Worth reading first:
+Decisions that are still true live in more than one directory, and the index
+explains which. Worth reading first:
 
 - **`rfc-process`** — the RFC process itself: numbering, the frozen-body rule,
   and how a decision is superseded rather than rewritten.

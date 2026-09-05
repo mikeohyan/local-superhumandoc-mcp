@@ -30,11 +30,17 @@ Rules that apply to every session:
 - **Architectural work gets an RFC.** Use the classification
   `superpowers:brainstorming` already made: architectural → RFC; bounded → no
   RFC unless it reverses an existing decision; spike → no RFC. Decisions with no
-  code count, such as pinning a dependency or setting a convention.
+  code count, such as pinning a runtime dependency or setting a convention.
+  Development tooling is the exception — a test runner, a linter, a formatter
+  sits below this threshold, as the `packaging` topic records. The line is
+  whether the choice reaches someone running the server. See the `rfc-process`
+  topic; the `rfc` skill is the procedure.
 - **An accepted RFC's body is frozen.** Never rewrite Context, Decision,
   Alternatives considered, or Consequences after acceptance — supersede the RFC
   instead. Frontmatter (`status`, `decided`, `superseded_by`, `commits`) stays
-  living, and the shipping session fills in Implementation notes.
+  living, and the shipping session fills in Implementation notes. This and the
+  transitions around it are set by the `rfc-process` topic and carried out by the
+  `rfc` skill, which is the authority if this summary and it ever disagree.
 - **Cite decisions by topic, never by number, in any living document.** This
   file, both `README.md` files, `.env.example`, `.gitignore`, everything under
   `.claude/skills/` and everything under `docs/` describe how the project works
@@ -46,7 +52,9 @@ Rules that apply to every session:
 - **Move RFC files with `git mv`, never plain `mv`.** Every transition edits
   frontmatter in the same commit as the move, which is exactly where git's
   rename inference fails. This applies to any tracked file in this repository,
-  not only RFCs.
+  not only RFCs. The `rfc-process` topic writes it into the transitions
+  themselves, so the correct command is the default path rather than something
+  to remember.
 
 ## Evidence and reference material live in `docs/`
 
