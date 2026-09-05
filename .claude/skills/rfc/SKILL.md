@@ -72,7 +72,7 @@ the single source of truth for the frontmatter fields and section headings — d
 not reproduce its structure from memory, read it.
 
 The slug is short, lowercase, hyphenated, and describes the decision rather than
-the component: `0007-mcp-auth-model`, not `0007-auth`.
+the component: `9999-mcp-auth-model`, not `9999-auth`.
 
 `topic:` is the opposite: it names the **subject**, not the decision, because
 living documents cite it in place of a number and successive decisions on the

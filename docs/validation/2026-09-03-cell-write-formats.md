@@ -6,6 +6,9 @@ and as vendor behaviour changes. Cite it from an RFC; do not paste it into one.
 **Status:** the desk research in the sections below is complete and sourced. The
 **test plan at the end has NOT been run** — its Results section is an empty
 template. An empty Results section here means untested, never tested-and-clean.
+Part of the plan is runnable today and part is not; the scratch doc's real column
+inventory, read live on 2026-09-05, is recorded at the head of the test plan and
+says which is which.
 
 ## What this document settles
 
@@ -422,7 +425,40 @@ question rather than something this file settles.
 Approximately 10 minutes once the scratch doc exists. Tests are ordered so the
 highest-value uncertainty resolves first. Everything is copy-pasteable.
 
-### Scratch doc structure (build in the UI first, ~3 min)
+### What the scratch doc actually has today
+
+Read live from the "MCP Validator" doc on 2026-09-05, so the blocked/runnable
+split below rests on this rather than on memory. Two tables exist, and neither is
+the `Targets`/`Writes` pair this plan specifies:
+
+| Table | Column | Type | Calculated |
+|---|---|---|---|
+| `test-table-01` | `Name` | text | no |
+| `test-table-01` | `number` | number | no |
+| `test-table-01` | `date` | date | no |
+| `test-table-01` | `Notes` | canvas | no |
+| `test-table-01` | `checkbox` | checkbox | no |
+| `test-table-01` | `dropdown` | select | no |
+| `test-table-01` | `Modified by` | person | **yes** |
+| `test-table-01` | `Modified on` | dateTime | **yes** |
+| `test-table-02` | `Name` | text | no |
+| `test-table-02` | `reaction` | reaction | no |
+| `test-table-02` | `button` | button | **yes** |
+| `test-table-02` | `Notes` | canvas | no |
+| `test-table-02` | `count` | number | no |
+
+Writable select, date, checkbox, canvas and reaction columns therefore exist. The
+tests needing them — T7, T7b, T12, the checkbox and canvas halves of T11, and a
+reaction write, which this plan has no test for — are runnable today against these
+tables, with the column ids substituted for the ones the preamble names.
+
+Still genuinely blocked, because no such column exists: anything needing a
+**relation** column (T1-T6, T8, T9 as scripted), a **non-calculated person**
+column (the only person column here is `Modified by`, which is calculated and so
+not writable), an **image** column (T10), or **duration** and **currency** columns
+(the other halves of T11).
+
+### Scratch doc structure the plan assumes (build in the UI first, ~3 min)
 
 Create one throwaway doc with two tables.
 
@@ -762,7 +798,9 @@ Lower priority, also unresolved: whether a browser link or API `href` is accepte
 relation (**T8**); whether person columns accept a row ID (**T6c**); ingest-vs-hotlink
 across the three image/file column types (**T10**); the documented default of
 `disableParsing`; and whether `time`, `reaction` and `packObject` columns are writable at
-all (untested, no sources).
+all (untested, no sources). Of those three, `reaction` is now answerable — the scratch
+doc has a writable reaction column, and this plan has no test targeting it. See the
+inventory at the head of the test plan.
 
 ---
 
