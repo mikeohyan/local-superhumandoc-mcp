@@ -237,11 +237,12 @@ nothing has decided which way that error should fall.
 
 There is also an unresolved tension to record rather than resolve here. The
 `failure-policy` topic's classification table places a 404 under "answered with a
-refusal — never replay", while §3.2 below tells the export poll loop to keep
-polling through one. Those read as contradictory on their face. The
-`failure-policy` topic's own implementation notes disclaim the poll loops as
+refusal — never replay". But a 404 from a status endpoint may mean only that the
+export or mutation ID has not yet replicated to the pod serving the request
+(§3.2), in which case the request that would follow is not a replay of anything.
+The `failure-policy` topic's own implementation notes disclaim the poll loops as
 tool-layer concerns, which is probably the reconciliation, but no document states
-that where the contradiction is visible. It belongs to whichever decision ends up
+that where the tension is visible. It belongs to whichever decision ends up
 claiming the poll loops.
 
 ---
@@ -850,10 +851,13 @@ the round trip staff warn against. Per-construct fidelity is measured separately
 
 # 3. The export state machine
 
-This is the subtlest part of the client. State it as rules, not as a status-string
-comparison.
+Export is the most intricate behaviour on this surface, and — unlike rate limiting,
+sizing or failure classification — **no decision owns it yet**. This section
+therefore records what the endpoints do and what has been observed of them. It does
+not say what the client does. See the note at the end of §3.2 for what remains
+undecided.
 
-## 3.1 Gate on `downloadLink` / `error`, never on `status`
+## 3.1 `downloadLink` and `error` are the only guaranteed signals; `status` is not
 
 **`PageContentExportStatus` is a dangling enum.** [SPEC-VERIFIED] It is defined:
 
@@ -884,57 +888,82 @@ forever and would have been reported. So `complete` is very probably correct.
 wrong, as predicted above. The completed-response `status` was `"complete"`, not
 `"completed"` — the code samples are wrong, also as predicted above.
 
-**But do not depend on it.** The field is typed as an unconstrained string by the
-API's own schema, so reading it is guessing. Gate on **presence of `downloadLink`**
-for success and **presence of `error`** for failure. This is immune to the whole
-ambiguity and costs nothing. Read `status` only for logging, and if you must branch
-on it, accept `complete` **and** `completed`.
+**The observation does not make the field dependable.** It is typed as an
+unconstrained string by the API's own schema, both of its spec examples are wrong,
+and the spec's code samples disagree with its own enum — so a single confirmed
+observation says what one run returned, not what the contract permits. The
+structurally guaranteed signals are different: `downloadLink` is present exactly
+when the export has produced a file, and `error` is present exactly when it has
+failed. Those two are unambiguous where `status` is not, and they cost nothing to
+read. Note also that `complete` and `completed` both appear across the spec's own
+material, so any code that does compare the string faces both.
 
-## 3.2 Rules
+## 3.2 What the endpoints do
 
-1. **Precondition:** only export pages whose `contentType == "canvas"`. `syncPage`
-   returns 400; `embed` is untested. Skip the rest with an explicit reason rather
-   than a generic error.
-2. **Choose the format for the payload:** `markdown` drops page-level attachments;
-   `html` retains them. If the caller needs attachments, `html` is the only option.
-3. **POST** `/docs/{docId}/pages/{pageIdOrName}/export` → expect **202** with `id`
-   and `href`. Charge it to `EXPORT_BUCKET`.
-4. **Sleep `EXPORT_INITIAL_SLEEP_S` (2 s) before the first status GET.** Staff
-   prescribe a delay; skipping it guarantees the 404 race.
-5. **Poll** the status GET at `EXPORT_POLL_INTERVAL_S` (2 s), backing off ×1.5 to a
-   15 s ceiling, until `EXPORT_DEADLINE_S` (90 s). Status GETs are read-bucket.
-6. **404 within `EXPORT_404_GRACE_S` (20 s) is *not* an error** — it means the
-   export ID has not replicated to the pod serving this request. Keep polling. After
-   the grace window, a 404 becomes terminal.
-7. **410 Gone is distinct from 404.** The status endpoint declares
+Facts, in the order a caller meets them.
+
+1. **Only canvas pages export.** `syncPage` returns 400; `embed` is untested. The
+   page's `contentType` is readable in advance, so the refusal is predictable
+   rather than something that must be discovered by trying.
+2. **The two formats carry different content.** `markdown` drops page-level
+   attachments; `html` retains them [STAFF, §2.5]. Nothing else distinguishes them
+   for this purpose, so attachments are the only axis on which the choice matters.
+3. **`POST /docs/{docId}/pages/{pageIdOrName}/export` returns 202** with `id` and
+   `href`. Which rate-limit bucket it draws on is **not established** — probe P6
+   ruled out the doc-content rates without identifying what does apply (§1.4,
+   §2.5).
+4. **An immediate first status GET races replication.** Staff prescribe a delay
+   before it — *"Simply wait a second and retry"* [STAFF, §2.5]. The magnitude is
+   unsourced.
+5. **Status GETs are read-bucket**, the cheapest of the four.
+6. **A 404 from the status endpoint is ambiguous.** Early, it means the export ID
+   has not replicated to the pod serving the request. Later, it is
+   indistinguishable from a request that never existed. Nothing in the response
+   separates the two cases; only elapsed time does, and no measurement establishes
+   where the boundary falls — probe P5 was to calibrate this and has not.
+7. **410 Gone is a distinct, declared outcome.** The status endpoint declares
    `410 — "The resource has been deleted."` [SPEC-VERIFIED], which `listRows` does
-   not. Read 410 as *the export request has aged out*, consistent with the file
-   living "a few days". Restart from the POST once; do not treat it as retryable
-   polling.
-8. **Success** = `downloadLink` present. **Failure** = `error` present; surface it
-   verbatim and stop.
-9. **Never cache `downloadLink`.** It expires in ~5 minutes while the underlying
-   file lives for days, so a cached link is the single most likely cause of a
-   mysterious later failure. Download immediately; if the download must be deferred
-   or retried, re-GET the status endpoint to mint a fresh URL —
-   the spec explicitly sanctions this: *"Call this method again to get a fresh link."*
-10. **Validate the downloaded body before returning it.** A dead link yields S3-style
-    XML, and a naive client hands that to the model as page content:
+   not. It is consistent with the export request having aged out, the exported file
+   living only "a few days" [STAFF]. Unlike a 404 it is unambiguous: the resource
+   existed and is gone, so no amount of further polling will produce it.
+8. **`error`, when present, carries the API's own failure text.** There is no
+   structured failure code alongside it.
+9. **`downloadLink` expires in ~5 minutes; the file behind it lives for days**
+   (§1.4, both measured). A link is therefore stale long before its content is, and
+   the spec sanctions re-minting: *"Call this method again to get a fresh link."*
+10. **A dead link returns S3-style XML with a 200 or a 403**, not an empty
+    response — probe P5b observed `403` with `<Code>AccessDenied</Code>`, where the
+    previously documented shape was `200` with `<Code>NoSuchKey</Code>`. Both are
+    `<?xml`-prefixed, which is the one property common to every observed form.
+    This matters because such a body is a plausible-looking string that is not page
+    content.
+11. **Concurrent exports of one page collide.** The blob key is
+    `DOC_EXPORT_RENDERING/{pageId}/{docId}` — keyed by page and doc, **not** by
+    request ID — so two in-flight exports of the same page contend for one object.
+12. **Export is single-page.** There is no recursive or bulk export endpoint;
+    `listPages` and `Page.children` are the only way to enumerate subpages. At the
+    POST rates in play, walking 50 pages is a multi-minute operation.
 
-    ```python
-    def looks_like_s3_error(body: bytes) -> bool:
-        head = body[:512].lstrip()
-        return head.startswith(b"<?xml") or b"<Code>NoSuchKey</Code>" in head
-    ```
+### What no decision owns here
 
-    On a non-200, or on a 200 that trips this check, re-GET status for a fresh link
-    up to `EXPORT_MAX_LINK_REFRESH` (2) times.
-11. **Serialise per `(docId, pageId)`.** The blob key omits the request ID, so two
-    in-flight exports of one page race on one object.
-12. **Recurse over subpages ourselves** via `listPages` / `Page.children`, capped at
-    `EXPORT_MAX_PAGES_PER_CALL` (50), reporting truncation. At 2 requests per 10 s
-    for the POST alone, 50 pages is ≥250 s — prefer a "list pages, then export
-    these N" flow over one tool call that blocks for minutes.
+Every item above is a fact about the API. Turning them into behaviour requires
+choices that no topic has made, and they are recorded here as open rather than
+answered:
+
+- Which rate-limit bucket an export POST is charged to (item 3), and how many
+  exports may be in flight at once, per page (item 11) and overall.
+- How long a 404 is tolerated before it is treated as terminal (item 6), and how
+  long to wait before the first poll (item 4). Both are in §1.1–§1.4 as unowned
+  constants, and the grace window is a correctness question rather than a pacing
+  one — see the note after §1.4.
+- Whether a downloaded body is validated before being returned, and how many times
+  a link is re-minted after a failed download (items 9 and 10).
+- Whether a tool walks subpages at all, and what happens when the walk is truncated
+  (item 12). The `tool-surface` topic's decided surface has no bulk or recursive
+  read; a capped recursion was described here as settled behaviour and was not.
+
+These belong to whichever decision claims the export subsystem. Until one does,
+this file records the constraints and not the policy.
 
 ---
 
