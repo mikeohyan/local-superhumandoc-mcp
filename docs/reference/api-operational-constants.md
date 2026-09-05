@@ -124,7 +124,7 @@ are that policy's parameters.
 
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
-| `RETRY_AFTER_TRUSTED` | `False` | [SPEC-VERIFIED] | No `Retry-After` or `X-RateLimit-*` header exists — see §2.2. Parse opportunistically, never require. **Probe P6, 2026-09-04**: a live attempt to provoke a real 429 (the ethically-bounded maximum of 6 rapid export POSTs) did not succeed — all six returned 202. Whether a genuine 429 carries `Retry-After` remains empirically unanswered; this entry's basis is unchanged and uncontradicted |
+| `RETRY_AFTER_TRUSTED` | `False` | [SPEC-VERIFIED] | No `Retry-After` or `X-RateLimit-*` header exists — see §2.2, so there is no signal to depend on; the `upstream-api` topic's retry rule is what says to parse one opportunistically if it ever appears and never require it. **Probe P6, 2026-09-04**: a live attempt to provoke a real 429 (the ethically-bounded maximum of 6 rapid export POSTs) did not succeed — all six returned 202. Whether a genuine 429 carries `Retry-After` remains empirically unanswered; this entry's basis is unchanged and uncontradicted |
 | `RETRY_AFTER_CLAMP_S` | `(1.0, 60.0)` | [DECIDED] | Bounds an untrusted value if one ever appears; set by the `upstream-api` topic |
 | `BACKOFF_BASE_S` | `2.0` | [DECIDED] | Staff suggest 30/60/120 s, which is intolerable inside a synchronous tool call. See note below; set by the `upstream-api` topic |
 | `BACKOFF_FACTOR` | `3.0` | [DECIDED] | Yields 2 s, 6 s, 18 s, 54 s; set by the `upstream-api` topic |
@@ -274,19 +274,24 @@ And on what it actually buys, same post:
 centre, every staff post, and all public code referencing it. Any other value is
 untested — see probe P2.
 
-**The 400 cannot be distinguished by shape** [SPEC-VERIFIED]. There are two 400
+**The 400 usually cannot be distinguished by shape, and the spec is not why**
+[SPEC-VERIFIED, corrected by live observation 2026-09-04]. The spec declares two 400
 schemas: `BadRequestError` (bare `{statusCode, statusMessage, message}`) and
 `BadRequestWithValidationErrors` (adds `codaDetail.validationErrors`). The latter is
 referenced by 49 operations — **all of them Packs, Pack-logs, or agent-logs
-endpoints**. Not one docs, rows, pages, tables, or columns operation uses it. On
-every endpoint this project touches, a staleness 400 and a malformed-request 400 are
-byte-identical.
+endpoints**; not one docs, rows, pages, tables, or columns operation declares it.
 
-**Corrected by live observation, 2026-09-04 (probes P2/P3).** `listPageContent`
-(`GET /docs/{docId}/pages/{pageId}/content`) *does* return a
+That reading of the spec once supported a blanket claim here that a staleness 400
+and a malformed-request 400 are byte-identical on every endpoint this project
+touches. **Probe P3 refuted it.** `listPageContent`
+(`GET /docs/{docId}/pages/{pageId}/content`) returns a
 `codaType`/`codaDetail.issues`-bearing 400 for a real schema violation (tested:
-`contentFormat=bogusFormat`) — the shape claim above does not hold for at least
-this docs-domain operation. Separately, and more consequentially:
+`contentFormat=bogusFormat`), despite declaring no such schema. What the spec
+declares is therefore a floor on what an endpoint may return, not a description of
+what it does return — a discriminator can be present where the spec promises none,
+so its absence can be relied on and its presence cannot.
+
+Separately, and more consequentially:
 `X-Coda-Doc-Version` was found to reject **any value other than the literal string
 `latest`** with `400 {"message":"Doc is not yet up to date."}` — reproduced
 deterministically across multiple endpoints and before any write had been made in
@@ -393,8 +398,9 @@ for a multi-client MCP server —
 Consequences: two tokens for one user share one bucket; two docs share one bucket;
 two MCP client processes on one account contend; and users behind one egress IP may
 contend with each other. A per-process limiter cannot see any of this, so **429s
-will occur that the limiter did not predict**. Surface that in the error text rather
-than pretending the limiter is authoritative.
+will occur that the limiter did not predict**. This is why the `upstream-api` topic
+requires that error text surfaced to the model say so, rather than presenting the
+limiter as authoritative.
 
 Spec prose, verbatim: *"Limits apply per-user across all endpoints that share the
 same limit and across all docs."* [SPEC-VERIFIED]
@@ -405,8 +411,10 @@ minutes, then made **one** write to a **fresh** doc and still received a 429,
 repeatedly; reads were unaffected. Eric Koleda: *"1 request per 10 seconds should be
 under the limit, so I'm not sure why you are still getting 429 errors."* It required
 an engineer to touch the account (`/47493/10`: *"the engineering fix has
-successfully stopped the 429 errors"*). Detect this state and fail fast with a
-distinct message rather than exhausting the deadline in a loop.
+successfully stopped the 429 errors"*). No amount of client-side waiting resolved
+it. The `failure-policy` topic is what requires detecting this state and failing
+fast with a distinct message rather than exhausting the deadline in a loop; the
+threshold and window it sets for that are in §1.1.
 
 **No tier escape hatch** [STAFF], <https://connect.superhuman.com/t/x/54749/2>
 (2025-03-25): *"Unfortunately we don't offer different tiers of rate limits
@@ -601,8 +609,10 @@ exhaustive negative search]
 is `Row[]`; `Row` is `additionalProperties: false` with
 `required: [id, type, href, name, index, browserLink, createdAt, updatedAt, values]`.
 There is no `deleted`/`tombstone` field, and a deleted row could not supply
-`values`, `index`, or `browserLink`. **Assume deletions are invisible to a delta
-and require a reconciling full read.**
+`values`, `index`, or `browserLink`. **A deleted row therefore cannot appear in a
+sync delta at all — the schema has no field that could represent one.** What a
+client should do about that is the open decision recorded at the end of this
+section.
 
 **Expiry and invalidation: no error string exists to quote.** [SPEC-VERIFIED on the
 shape] `listRows` declares 400/401/403/404/429 and notably **no 410**, in contrast
@@ -1010,10 +1020,17 @@ on them, and each is an absence in the specification rather than an inference:
   `/mutationStatus/{requestId}` — which has no concept of grouping writes or
   undoing them.
 
-The vendor's own MCP server offers all three (`table_create`, comments as a
-content channel, atomic multi-operation editing with rollback). They are
-capabilities of that server, not of this REST surface, so a client built on v1
-cannot reach them by trying harder.
+The vendor's own MCP server offers table creation and comments as a content
+channel [SPEC-VERIFIED against that server's published tool list at
+<https://coda.io/resources/mcp/tools-and-endpoints>, which names `table_create`
+and lists `comments` among `content_read`'s content types; the same page is
+quoted in `docs/validation/2026-09-03-markdown-fidelity-tests.md`]. It has
+additionally been described here as offering atomic multi-operation editing with
+rollback — **[unattributed]**, since that page documents `content_modify`'s
+element-anchored operations without saying anything about atomicity, and no other
+source has been recorded for it. Either way these are capabilities of that server
+rather than of this REST surface, so a client built on v1 cannot reach them by
+trying harder.
 
 **Present, and easy to miss.** `DELETE /docs/{docId}/pages/{pageIdOrName}/content`
 — `deletePageContent`, *"Delete content from a page. You can delete specific
