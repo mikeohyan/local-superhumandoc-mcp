@@ -57,14 +57,16 @@ The ratio is roughly two, from a single forum-reported data point in which the
 shows the same shape at 89 KB but carries no wire figure, so it cannot
 corroborate a ratio. The community explanation — that the ceiling counts the
 row's size in the stored document, rich text held as JSON and probably tallied
-in UTF-16 — is confirmed by nobody at Coda. Probe P7 has since measured the plain
-text case directly: a 102,468-byte row was refused as "101 KB" and a 133,188-byte
-one as "131 KB", so for ASCII the internal size is the wire size plus about a
-kilobyte, a ratio near 1.0 rather than 2.2. That does not license relaxing the
-cap. It establishes the floor and shows the 2.0 ratio in the forum report cannot
-have come from plain text, which leaves the rich-text case — the one users
-actually write — still unmeasured. So the client is asked to stay under a limit
-expressed in units it can compute for the easy case and not for the real one.
+in UTF-16 — is close, but it is no longer the best available account. Probe P7 ran
+across nine samples and the counter turns out to be computable: internal size is
+the value's UTF-8 byte length with **each newline charged twice**, matching every
+sample to about one percent. Two things follow. The ratio is bounded above by
+**2.0**, reached only by all-newline content — which explains the 2023 report
+exactly, since 44 KB counted as 87 KB is newline-dense text sitting at that limit.
+And non-ASCII is counted by decoded UTF-8 bytes rather than by the escaped wire
+form, so a client measuring the serialised request overestimates a CJK row by up
+to six times. The limit is therefore expressed in units the client *can* compute,
+provided it measures the right thing.
 
 **The refusal names a size and not a row, and this was tested rather than
 assumed.** An `upsertRows` carrying three rows, the middle one oversized, was
@@ -186,11 +188,17 @@ and deferred the rest to this wave. Ten rules follow.
    despite being scoped to a single element, because it shares the endpoint; the
    cap will simply never bind on a paragraph.
 
-3. **Two axes bound a chunk, and the byte axis is measured on the serialised
-   request.** Rows accumulate until either the count cap or the byte cap would
-   be exceeded, whichever comes first, with the byte figure taken from the JSON
-   that will actually be sent rather than estimated from the caller's objects.
-   The count cap governs many small rows; the byte cap governs few large ones.
+3. **Two axes bound a chunk, and each is measured against the thing it
+   protects.** Rows accumulate until either the count cap or a byte cap would be
+   exceeded, whichever comes first. The two byte caps measure differently, and
+   conflating them is the mistake this rule exists to prevent.
+   `MAX_REQUEST_BYTES` guards the request, so it is measured on the serialised
+   body actually being sent. `MAX_ROW_JSON_BYTES` guards the row, and the API
+   counts a row as its values' UTF-8 length with newlines charged twice — not as
+   wire bytes — so it is measured that way. A client that measured a row's
+   escaped JSON instead would refuse non-Latin rows six times smaller than the
+   API accepts. The count cap governs many small rows; the byte caps govern few
+   large ones.
    A row whose own serialised size, multiplied by `ROW_INFLATION_FACTOR`,
    already exceeds `MAX_ROW_JSON_BYTES` is placed in a chunk by itself, so that
    a refusal names that row and costs only that row rather than the batch around
@@ -324,8 +332,11 @@ and deferred the rest to this wave. Ten rules follow.
    need a row and a confidence marker in that file before any code reads them,
    and neither has evidence behind it today.
 
-   `ROW_INFLATION_FACTOR` is the weakest entry and the one rule 4 is built to
-   tolerate: its error costs a wasted round trip, never a wrong answer.
+   `ROW_INFLATION_FACTOR` is no longer a guess. Probe P7 measured the quantity it
+   stands for and found it computable and bounded above by 2.0, so 2.2 is a
+   ceiling rather than an estimate — roughly double what any realistic row needs.
+   Rule 4 still tolerates it being wrong, which now costs a wasted round trip in
+   a case that should be rare rather than routine.
 
 **Not decided here.** Two things. The 125 MB document ceiling, past which the
 vendor says the API is not supported, is a property of the document rather than
@@ -482,12 +493,12 @@ fingerprints, and nothing would catch it. A missed
 match degrades to an ordinary 400 surfaced to the caller — tolerable rather than
 dangerous, but it will look like a bug.
 
-**Accepted risk, unresolved.** Seven of the ten values in rule 10's table have
-no empirical support: the five marked `[CHOSEN — no evidence]` in `docs/`, plus
-`LIST_PAGE_SIZE_FLOOR` and `CHUNK_COST_ESTIMATE_S`, which this RFC names for the
-first time. `ROW_INFLATION_FACTOR` is now the best-supported of them and still
-only half measured: probe P7 pinned the plain-text ratio at about 1.0 and left
-the rich-text case, which is the one that drives the number, untouched. No probe
+**Accepted risk, unresolved.** Six of the ten values in rule 10's table have
+no empirical support: four of the five marked `[CHOSEN — no evidence]` in `docs/`,
+plus `LIST_PAGE_SIZE_FLOOR` and `CHUNK_COST_ESTIMATE_S`, which this RFC names for the
+first time — though `ROW_INFLATION_FACTOR` has left that list entirely, since P7
+measured the quantity behind it across nine samples and bounded it at 2.0. No
+probe
 in the existing plan targets the row-count, delete-count or page-content caps at
 all, so those would need new ones. Rule 4 is a real mitigation, but it means the
 first oversized batch a user sends costs extra round trips to discover a limit

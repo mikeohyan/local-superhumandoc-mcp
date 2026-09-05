@@ -136,7 +136,7 @@ encodes this explicitly, treating 429 as retryable even for non-idempotent verbs
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
 | `MAX_REQUEST_BYTES` | `1_500_000` (1.5 MB) | [STAFF] on the ceiling, [CHOSEN] on the margin | Published cap is **2 MB**; 25% headroom for encoding overhead |
-| `ROW_INFLATION_FACTOR` | `2.2` | **[MEASURED as a floor, 2026-09-04]** on plain text, [STAFF-adjacent] on the worst case | **Probe P7 ran.** For plain ASCII the ratio is ≈**1.01**, not 2.2: a 102,468-byte request was rejected as "101 KB" and a 133,188-byte one as "131 KB", so internal ≈ wire + ~1 KB. The 2.2 is **kept deliberately** — the 2.0 ratio in the forum report was presumably rich text, which the community explanation attributes to formatted content being stored as JSON, and that case is still unmeasured. ASCII is the floor, not the number to size for |
+| `ROW_INFLATION_FACTOR` | `2.2` | **[MEASURED 2026-09-05, nine samples]** | **The quantity is computable, not a guess.** Internal size ≈ the value's UTF-8 byte length with each newline counted **twice**, accurate to ~1% across every shape tested. The ratio is therefore bounded above by **2.0** — the all-newline limit — and 2.2 is a safe ceiling that is roughly double what any realistic row needs. See §2.3 |
 | `MAX_ROW_JSON_BYTES` | `38_000` (38 KB) | [CHOSEN — no evidence, tune later] | 38 KB × 2.2 ≈ 84 KB internal, under the published 85 KB row ceiling |
 | `MAX_ROWS_PER_UPSERT` | `100` soft, `250` hard | [CHOSEN — no evidence, tune later] | **No published limit exists.** A user reports "several hundred rows" in one call working in production. The byte cap binds first for fat rows |
 | `MAX_ROW_IDS_PER_DELETE` | `500` | [CHOSEN — no evidence, tune later] | Row IDs are ~12 bytes; the byte cap never binds. Larger batches consume fewer doc-content-write tokens |
@@ -421,7 +421,43 @@ distinguishable from each other, but a size refusal is separable from a plain
 on. This was tested because a client that must react to a size refusal needs a
 discriminator, and a field would have been far more durable than a substring.
 
-**The row ceiling behaves the same way** [observed 2026-09-04, probe P7]. Provoked
+**What the 85 KB actually counts** [measured 2026-09-05, nine samples]. The
+counter is not the request's wire bytes and not a mystery. Every sample fits
+`internal ≈ utf8_len(value) + newline_count`, i.e. the value's UTF-8 length with
+each newline charged twice, reported in units of 1024 bytes:
+
+| Value | UTF-8 bytes | Newlines | Predicted | Reported |
+|---|---|---|---|---|
+| 133,000 × `y` | 133,000 | 0 | 129.9 KB | **130 KB** |
+| 120,000 chars, newline every 10th | 120,000 | 12,000 | 128.9 KB | **129 KB** |
+| 120,000 chars, newline every 2nd | 120,000 | 60,000 | 175.8 KB | **176 KB** |
+| 100,000 × `中` | 300,000 | 0 | 293.0 KB | **294 KB** |
+| 75,000 × emoji | 300,000 | 0 | 293.0 KB | **294 KB** |
+| 84,160 × `y` + 4,000 trailing newlines | 88,160 | 4,000 | 90.0 KB | **91 KB** |
+
+Three consequences follow, and all three matter to a client.
+
+**The maximum ratio is 2.0, at all-newline content.** Nothing can exceed it, which
+retires the question of how conservative `ROW_INFLATION_FACTOR` needs to be. It
+also explains the 2023 forum report exactly — a 44 KB body counted as 87 KB is
+newline-dense content sitting at that limit, which is what a markdown list or a
+pasted document looks like.
+
+**Non-ASCII is counted by decoded UTF-8 bytes, not by the escaped wire form.** The
+CJK and emoji rows above were 600,065 and 900,065 bytes on the wire, because
+`json.dumps` escapes non-ASCII to `\uXXXX`; both were counted as 294 KB. A client
+that measures the serialised request therefore **overestimates by up to 6×** for
+non-Latin text and will split or refuse rows the API would have taken.
+
+**Spreading a value across columns costs nothing extra.** 66 KB in each of two
+columns was counted as 129 KB, the same as 132 KB in one.
+
+The trailing-newline sample is the one that missed, by 1 KB (1.1%): its newlines
+were one contiguous block rather than interspersed, so a run of empty paragraphs
+may cost slightly more than two bytes each. Treat the formula as an estimate good
+to about a percent, not an exact reproduction of Coda's accounting.
+
+**The row ceiling's refusal shape** [observed 2026-09-04, probe P7]. Provoked
 against a real table row, complete and verbatim:
 
 ```json

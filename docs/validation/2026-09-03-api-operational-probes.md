@@ -762,9 +762,24 @@ Deviation from the plan as written: it piped responses through
 the question of whether a size refusal carries a structured discriminator was live,
 full bodies were kept instead. They do not — see §2.3 of the constants file.
 
-Cleanup: all six rows written by P7 and by the timing probe were deleted, the
-delete mutation was polled to `completed`, and a read-back confirmed the table
-returned to its original eleven rows.
+**Second run, 2026-09-05 — the rich-text repeat the plan asked for.** Nine further
+samples, every one sized to be refused so that each reported its internal size and
+none wrote a row. The plan's premise, that formatting inflates because rich content
+is stored as JSON structures, is close but not what happens: markdown punctuation
+costs nothing (133,000 characters of markdown with the newlines replaced by spaces
+counted the same 130 KB as 133,000 plain `y`), while **newlines cost exactly
+double**. The result is a formula rather than a factor — internal size is the
+value's UTF-8 length with each newline charged twice — with the full sample table
+and its three consequences recorded in §2.3 of the constants file.
+
+Canvas columns were not used for this. Writing rich content to one is pointless
+here: staff confirm markdown and HTML are not interpreted in a canvas column, so it
+would have measured literal characters, which the text column already answers.
+
+Cleanup: all six rows written by P7's first run and by the timing probe were
+deleted, the delete mutation was polled to `completed`, and a read-back confirmed
+the table returned to its original eleven rows. The second run created nothing —
+every request was refused — and a read-back confirmed eleven rows and no strays.
 
 ## P8 — Sync-token deletion reporting
 
