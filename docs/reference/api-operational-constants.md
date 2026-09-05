@@ -27,12 +27,24 @@ Corrections belong in place. This file is mutable.
 | **[SPEC-VERIFIED]** | Read directly out of the v1.6.0 OpenAPI document, or measured against the live API |
 | **[INFERRED-FROM-CLIENTS]** | Observed in the source of a working production client; not documented anywhere |
 | **[CHOSEN — no evidence, tune later]** | A judgement call. No source supports the specific number. Expected to move once the probes in `docs/validation/2026-09-03-api-operational-probes.md` are run |
-| **[DECIDED]** | An operating value set by an RFC, named in the justification column. Recorded here with its evidence; changing it means amending that RFC, not editing this file |
+| **[DECIDED]** | An operating value a decision owns, with the owning **topic** named in the justification column. Recorded here with its evidence |
+| **[DECIDED — no evidence]** | Owned as above, but nothing measured or published supports the number itself |
+| **[DECIDED — thin evidence]** | Owned as above, with a single observation behind it and margin added on top |
+
+**Owned does not mean frozen here, and it does not mean well-founded.** Whether a
+`[DECIDED]` value can be retuned by editing this file depends on the decision that
+owns it: both the `upstream-api` and `request-sizing` topics say in terms that
+their numbers may move against observation without a new RFC, because what those
+decisions fix is the rule and not the calibration. Where a decision does *not* say
+that, the value changes only by superseding it — an accepted RFC body is never
+amended in place. Either way the edit belongs to whoever owns the topic, and the
+justification column is where to look before touching a number.
 
 The distinction matters most in the constants table. Several numbers there look
 equally authoritative and are not: `EXPORT_LINK_TTL_S` is staff-quantified,
 `EXPORT_INITIAL_SLEEP_S` is staff-motivated but arbitrary in magnitude, and
-`MAX_ROWS_PER_UPSERT` has no published basis at all.
+`LIST_PAGE_SIZE_FLOOR` is owned by a topic while resting on nothing measured at
+all. Ownership settles who may change a value, never whether it is right.
 
 ---
 
@@ -135,22 +147,30 @@ encodes this explicitly, treating 429 as retryable even for non-idempotent verbs
 
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
-| `MAX_REQUEST_BYTES` | `1_500_000` (1.5 MB) | [STAFF] on the ceiling, [CHOSEN] on the margin | Published cap is **2 MB**; 25% headroom for encoding overhead |
-| `ROW_INFLATION_FACTOR` | `2.2` | **[MEASURED 2026-09-05, nine samples]** | **The quantity is computable, not a guess.** Internal size ≈ the value's UTF-8 byte length with each newline counted **twice**, accurate to ~1% across every shape tested. The ratio is therefore bounded above by **2.0** — the all-newline limit — and 2.2 is a safe ceiling that is roughly double what any realistic row needs. See §2.3 |
-| `MAX_ROW_JSON_BYTES` | `38_000` (38 KB) | [CHOSEN — no evidence, tune later] | 38 KB × 2.2 ≈ 84 KB internal, under the published 85 KB row ceiling |
-| `MAX_ROWS_PER_UPSERT` | `100` soft, `250` hard | [CHOSEN — no evidence, tune later] | **No published limit exists.** A user reports "several hundred rows" in one call working in production. The byte cap binds first for fat rows |
-| `MAX_ROW_IDS_PER_DELETE` | `500` | [CHOSEN — no evidence, tune later] | Row IDs are ~12 bytes; the byte cap never binds. Larger batches consume fewer doc-content-write tokens |
-| `MAX_PAGE_CONTENT_BYTES` | `700_000` (700 KB) | [CHOSEN — no evidence, tune later] | 700 KB × 2.2 ≈ 1.5 MB internal. No published page-content limit exists |
-| `LIST_PAGE_SIZE` | `200` requested | [INFERRED-FROM-CLIENTS] | `codaio` self-caps GET `limit` at 200. The real max is deliberately undocumented and **silently clamped** |
+| `MAX_REQUEST_BYTES` | `1_500_000` (1.5 MB) | [DECIDED] | Published cap is **2 MB**, staff-stated; the 25% headroom for encoding overhead is set by the `request-sizing` topic |
+| `ROW_INFLATION_FACTOR` | `2.2` | [DECIDED] | Owned by the `request-sizing` topic and, unusually for this table, **measured**: nine samples on 2026-09-05. Internal size ≈ the value's UTF-8 byte length with each newline counted **twice**, accurate to ~1% across every shape tested. The ratio is therefore bounded above by **2.0** — the all-newline limit — and 2.2 is a safe ceiling that is roughly double what any realistic row needs. See §2.3 |
+| `MAX_ROW_JSON_BYTES` | `38_000` (38 KB) | [DECIDED] | 38 KB × 2.2 ≈ 84 KB internal, under the published 85 KB row ceiling; set by the `request-sizing` topic. Conservative now that the internal size is computable — see §2.3 |
+| `MAX_ROWS_PER_UPSERT` | `100` | [DECIDED] | **No published limit exists.** A user reports "several hundred rows" in one call working in production. One number, not the former soft/hard pair: the `request-sizing` topic splits an over-cap batch rather than refusing it, so there is nothing for a hard limit to refuse |
+| `MAX_ROW_IDS_PER_DELETE` | `500` | [DECIDED] | Row IDs are ~12 bytes, so the byte cap never binds; larger batches consume fewer doc-content-write tokens. Set by the `request-sizing` topic. The matching value in a third-party client is a coincidence, not a source — see the do-not-cite note in the cell-write findings |
+| `MAX_PAGE_CONTENT_BYTES` | `700_000` (700 KB) | [DECIDED] | 700 KB × 2.2 ≈ 1.5 MB internal. No published page-content limit exists. Set by the `request-sizing` topic, which refuses an over-cap page body rather than splitting it |
+| `LIST_PAGE_SIZE` | `200` requested | [INFERRED-FROM-CLIENTS] | `codaio` self-caps GET `limit` at 200. The real max is deliberately undocumented and **silently clamped**, so the number requested is never the number to trust — see §2.3 |
+| `LIST_PAGE_SIZE_FLOOR` | `25` | [DECIDED — no evidence] | The floor of the page-size ladder the `request-sizing` topic runs on a 504. No 504 has ever been observed from this client, so both the ladder and its floor are reasoning from a staff answer to another user's problem |
+| `CHUNK_COST_ESTIMATE_S` | `30.0` | [DECIDED — thin evidence] | What the `request-sizing` topic charges against the tool-call deadline before starting another chunk. The only measurement is one single-row insert that reported `completed` at ~23 s (§1.3); 30 s adds margin over a sample of one |
 | `PAGE_CONTENT_LIST_LIMIT` | `500` | [SPEC-VERIFIED] | `listPageContent` uses a distinct `pageContentLimit` param with `maximum: 500`, `default: 50` |
 
-Chunk on **both** axes — accumulate rows until either the count cap or
-`MAX_REQUEST_BYTES` is reached, measured on the actual serialised JSON. 100 rows ×
-38 KB would be 3.8 MB, so the byte cap governs fat rows and the count cap governs
-skinny ones.
+The two byte caps do not measure the same thing, which is the fact that makes them
+easy to misuse. `MAX_REQUEST_BYTES` is about the request, so it is a count of the
+bytes actually put on the wire. `MAX_ROW_JSON_BYTES` is about the row, and §2.3
+shows the server counts a row as its values' UTF-8 length with newlines charged
+twice — a quantity that can be six times smaller than the same row's escaped JSON.
+100 rows at 38 KB would be 3.8 MB, so on either measure the byte axis binds for
+large rows and the count axis for small ones. What a client does with these — split
+or refuse, and which measure applies where — is set by the `request-sizing` topic.
 
-Reject an oversized single row **before** sending it. The server's error does not
-identify which row in the batch was at fault.
+**A batch refusal does not identify the offending row** [measured 2026-09-04]. An
+`upsertRows` carrying three rows, the middle one oversized, was refused with a
+message identical in form to the single-row case: it gives a size and nothing else.
+This entry previously asserted the same thing without a citation; it now has one.
 
 ## 1.3 Asynchronous mutation polling
 
@@ -511,7 +531,9 @@ The binding constraint is the 2 MB body, not a row count.
 > the response to see if there are more results available, rather than relying on a
 > result set that matches your provided limit."
 
-So continuation must key off `nextPageToken`, never off a short result set.
+So a short page is not evidence that a listing has ended, and a full page is not
+evidence that it has not: `nextPageToken` is the only signal separating them. How a
+client is required to use it is set by the `request-sizing` topic.
 
 **Docs over 125 MB lose API access entirely** [help centre]:
 
@@ -523,8 +545,10 @@ So continuation must key off `nextPageToken`, never off a short result set.
 The 125 MB excludes file attachments. Separately, HTML exports cannot exceed
 125 MB (does not apply to PDF or plain text), and all docs are subject to a 325 MB
 formula-calculation limit above which calculations are disabled. Doc size is not
-readable through the API — if a doc produces persistent 4xx/timeouts across
-multiple endpoints, surface this message so the user can check the Statistics panel.
+readable through the API; the document's own Statistics panel is where a user can
+see it. Persistent 4xx or timeouts across multiple endpoints are the symptom this
+would produce. When a client raises that as a hypothesis is set by the
+`request-sizing` topic.
 
 ## 2.4 Sync tokens — the least-exercised surface in the API
 
@@ -914,12 +938,17 @@ For 429 handling specifically: `codaio`, `coda-js`, the n8n Coda node and
 > **infrastructure limit in our API** that's causing requests to fail. Have you
 > looked into reducing the size or complexity of the doc?"
 
-**Response:** treat a 504 from `listRows` as **"reduce `limit` and retry"**, not as
-a transient blip to back off on. Halve the requested page size (e.g. 200 → 100 → 50
-→ 25) and retry, up to a floor of 25, before surfacing the failure. Backing off in
-time does not help — the request is too expensive at that page size and will time
-out again. Include the doc-size hypothesis in the error text so the user can check
-the Statistics panel against the 125 MB API ceiling (§2.3).
+**What follows from that.** Staff attribute the failure to the request's cost at
+the page size asked for, not to a transient condition, so waiting does not change
+the outcome — the same request at the same `limit` times out again. A smaller
+`limit` is the only lever the caller has, and a `pageToken` cannot carry one,
+because the API ignores every parameter sent beside it (§2.4). A smaller page size
+can therefore only take effect by starting the listing over.
+
+Those are the facts. The behaviour they imply — that a 504 restarts the listing at
+a halved page size down to `LIST_PAGE_SIZE_FLOOR`, which pass's rows survive, and
+that the failure surfaced at the floor carries the 125 MB doc-size hypothesis
+(§2.3) — is set by the `request-sizing` topic.
 
 There is precedent for API-wide degradation unrelated to any client behaviour: a
 multi-day timeout incident in March 2026 (<https://connect.superhuman.com/t/60264>)
