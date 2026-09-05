@@ -33,12 +33,16 @@ Corrections belong in place. This file is mutable.
 
 **Owned does not mean frozen here, and it does not mean well-founded.** Whether a
 `[DECIDED]` value can be retuned by editing this file depends on the decision that
-owns it: both the `upstream-api` and `request-sizing` topics say in terms that
-their numbers may move against observation without a new RFC, because what those
-decisions fix is the rule and not the calibration. Where a decision does *not* say
-that, the value changes only by superseding it — an accepted RFC body is never
-amended in place. Either way the edit belongs to whoever owns the topic, and the
-justification column is where to look before touching a number.
+owns it. Three topics say in terms that their numbers may move against observation
+without a new RFC — `upstream-api`, `request-sizing` and `failure-policy` — because
+what those decisions fix is the rule and not the calibration. The `tool-surface`
+topic also owns values here, but with weaker language: it says its poll intervals
+and deadlines are "named constants so they can be tuned once real documents are
+observed", which states the intent without granting the licence outright. Where a
+decision does *not* say either, the value changes only by superseding it — an
+accepted RFC body is never amended in place. Either way the edit belongs to whoever
+owns the topic, and the justification column is where to look before touching a
+number.
 
 The distinction matters most in the constants table. Several numbers there look
 equally authoritative and are not: `EXPORT_LINK_TTL_S` is staff-quantified,
@@ -125,10 +129,10 @@ are that policy's parameters.
 | `BACKOFF_BASE_S` | `2.0` | [DECIDED] | Staff suggest 30/60/120 s, which is intolerable inside a synchronous tool call. See note below; set by the `upstream-api` topic |
 | `BACKOFF_FACTOR` | `3.0` | [DECIDED] | Yields 2 s, 6 s, 18 s, 54 s; set by the `upstream-api` topic |
 | `BACKOFF_MAX_S` | `60.0` | [DECIDED] | Matches the Onyx connector's `max_delay`; set by the `upstream-api` topic |
-| `BACKOFF_JITTER` | equal jitter — `delay/2 + uniform(0, delay/2)` | [INFERRED-FROM-CLIENTS] | Every surveyed client that backs off applies jitter; buckets are shared, so unjittered clients synchronise |
+| `BACKOFF_JITTER` | equal jitter — `delay/2 + uniform(0, delay/2)` | [DECIDED] | Equal jitter is named in the `upstream-api` topic's own retry rule, so the algorithm is decided rather than inferred; the survey is its evidence. Every surveyed client that backs off applies jitter; buckets are shared, so unjittered clients synchronise |
 | `MAX_429_RETRIES_READ` | `3` | [DECIDED] | ≈26 s of waiting; set by the `upstream-api` topic |
 | `MAX_429_RETRIES_WRITE` | `4` | [DECIDED] | ≈80 s of waiting; set by the `upstream-api` topic |
-| `STICKY_429_THRESHOLD` | `3` consecutive 429s, `STICKY_429_WINDOW_S` `120.0` with zero successes | [STAFF] | Sticky account-level 429s exist that backoff cannot clear — see §2.2 |
+| `STICKY_429_THRESHOLD` | `3` consecutive 429s, `STICKY_429_WINDOW_S` `120.0` with zero successes | [DECIDED — thin evidence] | Sticky account-level 429s exist that backoff cannot clear — see §2.2. The threshold and window are set by the `failure-policy` topic, which supplied the trigger the `upstream-api` topic required and left unnumbered. Adopted from a staff report rather than measured, and tunable without superseding |
 | `TOOL_CALL_DEADLINE_S` | `90.0` | [DECIDED] | Hard ceiling regardless of retries remaining. An MCP tool call has a human waiting on it; set by the `upstream-api` topic |
 
 On the backoff base: staff's own recommendation is materially slower —
@@ -153,7 +157,7 @@ encodes this explicitly, treating 429 as retryable even for non-idempotent verbs
 | `MAX_ROWS_PER_UPSERT` | `100` | [DECIDED] | **No published limit exists.** A user reports "several hundred rows" in one call working in production. One number, not the former soft/hard pair: the `request-sizing` topic splits an over-cap batch rather than refusing it, so there is nothing for a hard limit to refuse |
 | `MAX_ROW_IDS_PER_DELETE` | `500` | [DECIDED] | Row IDs are ~12 bytes, so the byte cap never binds; larger batches consume fewer doc-content-write tokens. Set by the `request-sizing` topic. The matching value in a third-party client is a coincidence, not a source — see the do-not-cite note in the cell-write findings |
 | `MAX_PAGE_CONTENT_BYTES` | `700_000` (700 KB) | [DECIDED] | 700 KB × 2.2 ≈ 1.5 MB internal. No published page-content limit exists. Set by the `request-sizing` topic, which refuses an over-cap page body rather than splitting it |
-| `LIST_PAGE_SIZE` | `200` requested | [INFERRED-FROM-CLIENTS] | `codaio` self-caps GET `limit` at 200. The real max is deliberately undocumented and **silently clamped**, so the number requested is never the number to trust — see §2.3 |
+| `LIST_PAGE_SIZE` | `200` requested | [DECIDED] | Named in the `request-sizing` topic's own table of operating values, as the page size to request and never to trust; `codaio` self-caps GET `limit` at 200, which is its evidence. The real max is deliberately undocumented and **silently clamped**, so the number requested is never the number to trust — see §2.3 |
 | `LIST_PAGE_SIZE_FLOOR` | `25` | [DECIDED — no evidence] | The floor of the page-size ladder the `request-sizing` topic runs on a 504. No 504 has ever been observed from this client, so both the ladder and its floor are reasoning from a staff answer to another user's problem |
 | `CHUNK_COST_ESTIMATE_S` | `30.0` | [DECIDED — thin evidence] | What the `request-sizing` topic charges against the tool-call deadline before starting another chunk. The only measurement is one single-row insert that reported `completed` at ~23 s (§1.3); 30 s adds margin over a sample of one |
 | `PAGE_CONTENT_LIST_LIMIT` | `500` | [SPEC-VERIFIED] | `listPageContent` uses a distinct `pageContentLimit` param with `maximum: 500`, `default: 50` |
@@ -187,10 +191,10 @@ treat the field as absent rather than null.
 
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
-| `MUTATION_INITIAL_SLEEP_S` | `3.0` | [STAFF] on the need, [CHOSEN] on the magnitude | "add a short sleep, **maybe a few seconds**, before the first time you call that endpoint" — see §2.1 |
-| `MUTATION_POLL_INTERVAL_S` | `2.0` | [CHOSEN — no evidence, tune later] | Status reads are the cheapest bucket |
-| `MUTATION_404_GRACE_S` | `15.0` | [CHOSEN — no evidence, tune later] | A 404 before this is replication lag, not a missing mutation. **Probe P4, 2026-09-04**: two independent write→poll sequences on a near-empty scratch doc never produced a 404, including at t=0 immediately after the write — the endpoint consistently returned 200 with `completed:false` instead. `completed` flipped to `true` between t=16s and t=18s. The 404-replication race did not reproduce on this doc; the observed bottleneck was completion latency (~18s), not a 404 window |
-| `MUTATION_DEADLINE_S` | `60.0` | [CHOSEN — no evidence, tune later] | Then return "queued, not confirmed" — never an error. Staff describe the underlying delay as "30 seconds to a few minutes" and architectural |
+| `MUTATION_INITIAL_SLEEP_S` | `3.0` | [STAFF] | Staff confirm the *need* for a first-poll delay — "add a short sleep, **maybe a few seconds**, before the first time you call that endpoint" (see §2.1) — but nothing sources the specific 3.0 s. An initial delay is not a poll interval or a deadline, so it falls outside what `tool-surface` delegates; it has no owner |
+| `MUTATION_POLL_INTERVAL_S` | `2.0` | [DECIDED — no evidence] | Status reads are the cheapest bucket. A poll interval, and so owned by the `tool-surface` topic, which names the poll intervals and deadlines here as constants to be tuned once real documents are observed |
+| `MUTATION_404_GRACE_S` | `15.0` | [CHOSEN — no evidence, tune later] | A 404 before this is replication lag, not a missing mutation. **Probe P4, 2026-09-04**: two independent write→poll sequences on a near-empty scratch doc never produced a 404, including at t=0 immediately after the write — the endpoint consistently returned 200 with `completed:false` instead. `completed` flipped to `true` between t=16s and t=18s. The 404-replication race did not reproduce on this doc; the observed bottleneck was completion latency (~18s), not a 404 window. A tolerance window is neither a poll interval nor a deadline, so `tool-surface` does not reach it and it has no owner — see the note after §1.4 |
+| `MUTATION_DEADLINE_S` | `60.0` | [DECIDED — no evidence] | Then return "queued, not confirmed" — never an error. Staff describe the underlying delay as "30 seconds to a few minutes" and architectural. A deadline, and so owned by the `tool-surface` topic |
 
 The endpoint is at the **root**: `GET /mutationStatus/{requestId}`, *not*
 `/docs/{docId}/mutationStatus/{requestId}` [SPEC-VERIFIED]. At least one public
@@ -202,17 +206,43 @@ for more than one day after the mutation was completed"* [SPEC-VERIFIED].
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
 | `EXPORT_BUCKET` | `BUCKET_WRITE` | [CHOSEN — no evidence, tune later] | **Not** the doc-content bucket. Genuinely undocumented; two independent client authors assume the tightest bucket, and **probe P6, 2026-09-04 refuted that**: six export POSTs in under 2 seconds all returned 202 with zero 429s, inconsistent with 3/10 s or 5/10 s, and served by a distinct `api-doc` backend pod class. A six-request burst is still within the general write bucket's published 10/6 s, so that bucket is not excluded — P6 narrows the question rather than answering it. `BUCKET_WRITE` is the conservative reading of what survives. See §2.5 |
-| `EXPORT_INITIAL_SLEEP_S` | `2.0` | [STAFF] on the need, [CHOSEN] on the magnitude | Staff: *"Simply wait a second and retry"* — see §2.5 |
-| `EXPORT_POLL_INTERVAL_S` | `2.0` | [INFERRED-FROM-CLIENTS] | Status GET is read-bucket; at 2 s this uses ~1.5% of it. Matches the two best-behaved clients |
-| `EXPORT_POLL_BACKOFF` | ×1.5, capped at `EXPORT_POLL_MAX_INTERVAL_S = 15.0` | [INFERRED-FROM-CLIENTS] | `ofloveandhate/codaio` uses 1 s × 1.5 → 15 s |
-| `EXPORT_DEADLINE_S` | `90.0` | [CHOSEN — no evidence, tune later] | No source quantifies export duration. `codaio` allows 300 s; 90 s fits a synchronous tool call |
-| `EXPORT_404_GRACE_S` | `20.0` | [CHOSEN — no evidence, tune later] | A 404 within this window is replication lag. Calibrate with probe P5 |
+| `EXPORT_INITIAL_SLEEP_S` | `2.0` | [STAFF] | Staff confirm the *need* — *"Simply wait a second and retry"* (see §2.5) — but nothing sources the specific 2.0 s. Like its mutation counterpart, an initial delay is neither a poll interval nor a deadline, so it falls outside what `tool-surface` delegates and has no owner |
+| `EXPORT_POLL_INTERVAL_S` | `2.0` | [DECIDED — no evidence] | A poll interval, owned by the `tool-surface` topic. Status GET is read-bucket; at 2 s this uses ~1.5% of it. Matches the two best-behaved clients |
+| `EXPORT_POLL_BACKOFF` | ×1.5, capped at `EXPORT_POLL_MAX_INTERVAL_S = 15.0` | [DECIDED — no evidence] | The schedule the poll interval follows, so owned by `tool-surface` on the same delegation as the interval itself — a wider reading than the bare word "interval", flagged here because it is the one boundary call in that mapping. `ofloveandhate/codaio` uses 1 s × 1.5 → 15 s |
+| `EXPORT_DEADLINE_S` | `90.0` | [DECIDED — no evidence] | A deadline, owned by the `tool-surface` topic. No source quantifies export duration. `codaio` allows 300 s; 90 s fits a synchronous tool call |
+| `EXPORT_404_GRACE_S` | `20.0` | [CHOSEN — no evidence, tune later] | A 404 within this window is replication lag. Calibrate with probe P5. A tolerance window is neither a poll interval nor a deadline, so `tool-surface` does not reach it and it has no owner — see the note below on why that matters more here than the marker suggests |
 | `EXPORT_LINK_TTL_S` | `300` (5 min) | **[STAFF], confirmed [SPEC-VERIFIED] 2026-09-04** | *"the downloadLink returned by the API expires after only a few minutes"*; the sibling Admin API endpoint publishes exactly 5 minutes. **Directly observed by probe P5b**: link served content at t=300s, failed by t=330s; the signed URL's own `X-Amz-Expires=300` query parameter corroborates this independent of staff prose — see §2.5 |
 | `EXPORT_FILE_TTL` | ~a few days | [STAFF] | *"the exported file remains live for a few days"* — the file outlives the link, which is why re-polling mints a fresh URL |
 | `EXPORT_MAX_LINK_REFRESH` | `2` | [CHOSEN — no evidence, tune later] | Re-GET the status endpoint to mint a fresh link |
 | `EXPORT_CONCURRENCY_PER_PAGE` | `1` | [INFERRED-FROM-CLIENTS] | The blob key is `DOC_EXPORT_RENDERING/{pageId}/{docId}` — keyed by page and doc, **not** by request ID, so concurrent exports of one page collide on one object |
 | `EXPORT_CONCURRENCY_GLOBAL` | `3` | [CHOSEN — no evidence, tune later] | Concurrency limits are entirely undocumented. `professor-eggs/coda-md-export` throttles to avoid "45+ concurrent exports at once" |
 | `EXPORT_MAX_PAGES_PER_CALL` | `50` | [CHOSEN — no evidence, tune later] | Export is single-page; recursion is ours. Bounded by `EXPORT_CONCURRENCY_GLOBAL` and the export deadline rather than by the doc-content rate, which P6 showed export does not draw on — surface truncation rather than blocking |
+
+### What the poll loops leave unowned
+
+The `tool-surface` topic delegates "the poll intervals and deadlines recorded in
+`docs/reference/`", and that phrase is read here at its face value: an interval
+between polls, or an absolute ceiling on a loop. Four constants in the two tables
+above sit just outside it and consequently have no owner at all —
+`MUTATION_INITIAL_SLEEP_S`, `EXPORT_INITIAL_SLEEP_S`, `MUTATION_404_GRACE_S` and
+`EXPORT_404_GRACE_S`. A delay before the *first* poll is not an interval between
+polls, and a window for tolerating a 404 is a tolerance rather than a deadline.
+
+The two grace windows are the ones worth flagging. They are not pacing: they
+decide how long a 404 from a status endpoint is read as replication lag before
+being treated as terminal, which is a correctness question. Set too short, a
+write that actually succeeded is reported as failed or unknown; set too long, a
+genuinely dead request is reported slowly. That the numbers are unowned means
+nothing has decided which way that error should fall.
+
+There is also an unresolved tension to record rather than resolve here. The
+`failure-policy` topic's classification table places a 404 under "answered with a
+refusal — never replay", while §3.2 below tells the export poll loop to keep
+polling through one. Those read as contradictory on their face. The
+`failure-policy` topic's own implementation notes disclaim the poll loops as
+tool-layer concerns, which is probably the reconciliation, but no document states
+that where the contradiction is visible. It belongs to whichever decision ends up
+claiming the poll loops.
 
 ---
 
