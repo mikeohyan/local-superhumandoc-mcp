@@ -2,7 +2,13 @@
 
 **Date:** 2026-09-03
 **Target:** `https://docs.superhuman.com/apis/v1` (formerly Coda API v1; specs are byte-identical)
-**Status:** NOT YET RUN — see the empty Results section at the bottom.
+**Status:** NOT YET RUN. B3, B4 and B5 each create their own fresh page through
+`POST /docs/{docId}/pages` and are runnable today. B1, B2 and B6 are blocked:
+they require the manual browser setup described under "Manual browser prep"
+below — a scratch page containing a real table, button, formula control,
+callout, divider, image, collapsible list and pull quote, duplicated twice in
+the UI to produce SCRATCH-A/B/C — which does not yet exist. See the empty
+Results section at the bottom.
 
 ## Before you run this
 
@@ -13,12 +19,11 @@
 
 ## Why this plan exists
 
-Coda staff, in the announcement thread for these exact page-content endpoints:
-
-> "HTML and markdown can't perfectly represent all of the features of a Coda doc, so a round trip in either format may lose some information. **These endpoints are best used for import or export scenarios, not page editing.**"
->
-> — Jonathan Goldman (Coda), *More powerful page endpoints in the Coda API*, 2 Nov 2023
-> https://connect.superhuman.com/t/more-powerful-page-endpoints-in-the-coda-api/44103
+Coda staff, in the announcement thread for these exact page-content endpoints,
+said plainly that a round trip through HTML or markdown can lose information and
+that these endpoints are best used for import/export, not page editing — see the
+full quote and source under "Round-trip fidelity — the constraint that shapes
+the tool surface" in `docs/reference/api-operational-constants.md` §2.5.
 
 That is the ceiling on every honest claim our `read_page` / `edit_page` tools can make. Beyond that statement, **no one — Coda, Superhuman, or any open-source implementation — has documented per-construct markdown fidelity.** No working implementation reviewed (orellazri/coda-mcp, TJC-LP/coda-mcp-server) contains any sanitizer, fidelity note, or destructive-write warning. This plan closes that gap empirically.
 
@@ -34,7 +39,7 @@ Confidence markers: **[S]** confirmed by Coda/Superhuman staff or first-party do
 |---|---|
 | [Import Markdown into Docs (help center)](https://help.coda.io/hc/en-us/articles/39555724729869-Import-Markdown-into-Coda) | "Superhuman Docs supports the **basic syntax** markdown flavor and, as such, **does not support text colors, highlights, and other extended features**." Basic syntax (markdownguide.org) **excludes** tables, task lists, strikethrough, footnotes, fenced code, autolinks. |
 | [Official Docs MCP tools & endpoints](https://coda.io/resources/mcp/tools-and-endpoints) | `content_read` takes `contentTypesToInclude` = **markdown, tables, formulas, controls, comments** — markdown is a *separate channel* from tables/formulas/controls. `content_modify` has **no whole-page replace**; only `insert_element`, `replace_element_text`, `replace_text`, `delete_element`, anchored by `elementId`. `markdownIncludeAnnotations` "adds `[[elementId]]` for editing". Verbatim: **"For tabular data, prefer `table_create` over Markdown tables."** |
-| [Page attachments export thread](https://connect.superhuman.com/t/coda-api-v1-how-to-retrieve-page-level-attachments-not-just-table-files-when-exporting-to-markdown-html/57065) | Eric Koleda (Coda): "While they are **omitted in the markdown export**, you can get the URLs from the HTML export." HTML export carries `<img src>` + `data-coda-blob-id`. |
+| [Page attachments export thread](https://connect.superhuman.com/t/coda-api-v1-how-to-retrieve-page-level-attachments-not-just-table-files-when-exporting-to-markdown-html/57065) | Page-level attachments are omitted from the markdown export and present in the HTML export — staff-confirmed; see `docs/reference/api-operational-constants.md` §2.5. HTML export carries `<img src>` + `data-coda-blob-id`. |
 | [Transform text with paragraph styles](https://help.coda.io/hc/en-us/articles/39555971852941-Transform-text-with-paragraph-styles) + [Format and style text](https://help.coda.io/hc/en-us/articles/39555789925389-Format-and-style-text) | Native canvas blocks: plain text, **H1/H2/H3 only**, bulleted/numbered/checklist/**collapsible** lists, block quotes, **pull quotes**, code blocks, **callouts**. Native inline: bold, italic, underline, strikethrough, inline code. |
 | [markdown via API thread](https://connect.superhuman.com/t/markdown-via-api/46228) | Luis Curiel (Coda), Feb 2024: markdown format works for **pages**; confirmed Mar 2024 that markdown into **canvas columns in table rows** "is not possible at the moment". |
 | [orellazri/coda-mcp](https://github.com/orellazri/coda-mcp) `src/helpers.ts`, `src/server.ts` | Reference TS implementation: export -> poll (5x5s) -> GET downloadLink. **Zero** sanitizing, validation, fidelity notes or warnings. Always `format:"markdown"`, never HTML. Its `coda_duplicate_page` does export-markdown -> create-page-from-markdown, i.e. it silently ships the lossy round trip as "duplicate". |
@@ -72,7 +77,7 @@ Confidence markers: **[S]** confirmed by Coda/Superhuman staff or first-party do
 |---|---|
 | Tables / views | Undocumented. `content_read` exposes `tables` separately from `markdown` **[S]** -> infer markdown does not faithfully carry them **[C]**. Rendered / flattened / omitted is **the biggest untested unknown** **[?]** |
 | Buttons, controls, formula chips | Separate `controls` / `formulas` content types **[S]**; separate `/docs/{docId}/controls` and `/formulas` endpoints **[S]** -> almost certainly flattened to a value or omitted **[C]** |
-| Images / page attachments | **Omitted from markdown export** — staff-confirmed **[S]**. Present in HTML export **[S]** |
+| Images / page attachments | Omitted from markdown export, present in HTML export **[S]** — see `docs/reference/api-operational-constants.md` §2.5 |
 | Callouts | Native block **[S]**, not in `PageLineStyle` **[S]** -> flattened in the cheap read; markdown export emission unknown **[?]** |
 | Pull quotes, collapsible lists | In `PageLineStyle` (cheap read sees them) **[S]** but **no markdown syntax** -> downgraded on export **[C]**, unrecreatable from markdown **[S]** |
 | Dividers | Not in `PageLineStyle` at all **[S]** |

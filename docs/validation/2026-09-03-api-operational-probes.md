@@ -4,9 +4,10 @@
 **Target:** `https://docs.superhuman.com/apis/v1` (formerly Coda API v1; specs are byte-identical)
 **Status:** RUN on 2026-09-04. P1, P2, P3, P4, P5 (a/b/c), P6, and P9 were executed
 (P3/P4 adapted to a canvas-page content write in place of a table-row write, since
-the scratch doc had no table at the time — see Results). P7 RAN on 2026-09-04 once
-the doc gained tables; P8 is still NOT RUN, though it is no longer blocked — the
-table with a writable column it needs now exists. See the
+the scratch doc had no table at the time — see Results). P7 ran on 2026-09-04
+once the doc gained tables, then ran a second time on 2026-09-05 for the
+rich-text repeat the plan called for; P8 is still NOT RUN, though it is no
+longer blocked — the table with a writable column it needs now exists. See the
 Results section for raw output and findings, several of which contradict the
 plan's or the constants file's assumptions.
 
@@ -589,7 +590,7 @@ attempt 10 -> 200
 
 All ten returned 200. **No staleness 400 fired as a consequence of our own write, on this scratch doc, within the ~10 s window tested.** This matches the plan's "all ten attempts return 200 → the header is effectively inert on this account and workload" outcome — with the caveat from P2 that we cannot conclude the header is inert in general, only that it never fired due to an actual pending mutation in this session.
 
-**Control case — NOT RUN as specified.** The plan's control (`sortBy=natural&visibleOnly=false` against `$TABLE/rows`) requires a table; none exists. **Blocked part: the specific documented-unsatisfiable-combination request, which only exists on the rows/listRows endpoint.**
+**Control case — not yet run.** The plan's control (`sortBy=natural&visibleOnly=false` against `$TABLE/rows`) needs a table; the scratch doc had none when P3 was executed here, but it has since gained two (see P7 and P8 below), so the control is now runnable. It has not yet been run. **Outstanding part: the specific documented-unsatisfiable-combination request, which only exists on the rows/listRows endpoint.**
 
 **Adapted control performed instead**, using a genuinely invalid enum value against a real docs-domain endpoint (`listPageContent`'s `contentFormat`, whose spec declares exactly one legal value, `plainText`):
 
@@ -820,56 +821,17 @@ Running the plan's own second jq expression (`.style // "-"`, `.lineLevel // 0`,
 
 Element `id`s are present and look stable (`cl-` prefixed, one per line). All 4 lines were returned in one page (`hasNext: false`, `limit=500` well above the 4 actual lines). Plain text content for the 3 non-empty lines matched the P5a markdown export exactly, byte-for-byte — but all three lines were plain ASCII probe strings with no formatting, so this run cannot speak to how much formatting-fidelity plaintext loses versus markdown; that needs richer content, which is out of scope for this scratch doc.
 
-## Constants to update in `docs/reference/api-operational-constants.md`
+## Constants updates
 
-Each item below is a factual addition (what was observed, dated 2026-09-04) — none
-of them changes a recommended `Value` in the constants table. Where evidence
-conflicts with an existing `[CHOSEN — no evidence, tune later]` recommendation,
-the conflict is stated as fact; the number itself is left for an RFC-owning
-session to revisit, per the evidence-file convention.
-
-1. **`EXPORT_BUCKET`** (§1.4 table + §2.5 prose) — established by P6. Add: six
-   export POSTs fired in under 2 seconds all returned 202, zero 429s — inconsistent
-   with `EXPORT_BUCKET = BUCKET_DOC_CONTENT_WRITE` at either published doc-content
-   rate (3/10s or 5/10s). Also add the `x-coda-server: api-doc` / `api-doc-*` pod
-   detail from the same probe — export traffic is served by a visibly distinct
-   backend pod class from `api`/`api-*`, which served every other endpoint touched
-   in this session.
-2. **`RETRY_AFTER_TRUSTED`** (§1.1 + §2.2) — established by P6 (negative result).
-   Add: a live attempt to provoke a real 429 (P6, the ethically-bounded maximum of
-   6 requests) did not succeed — all six requests returned 202. Whether a genuine
-   429 carries `Retry-After` remains empirically unanswered; the existing
-   spec-reading-based evidence for `False` is unchanged and uncontradicted.
-3. **`MUTATION_404_GRACE_S` / `MUTATION_INITIAL_SLEEP_S` / `MUTATION_DEADLINE_S`**
-   (§1.3 + §2.1) — established by P4. Add: two independent write→poll sequences on
-   this scratch doc never produced a 404 from `getMutationStatus`, including at
-   t=0 immediately after the write. `completed` legitimately stayed `false` until
-   16-18 seconds after the write. The known 404-replication race did not reproduce
-   on this doc; the real bottleneck observed was completion latency, not a 404
-   window.
-4. **`EXPORT_LINK_TTL_S`** (§1.4 + §2.5) — established by P5a/P5b. Add: directly
-   observed download-link validity — HTTP 200 through t=300s, HTTP 403 by t=330s.
-   Corroborates 300s independent of staff prose. Also correct the documented
-   failure shape: the expired-link response observed here was **403 with
-   `<Code>AccessDenied</Code>`**, not the previously-documented 200-with-
-   `<Code>NoSuchKey</Code>` shape — both are `<?xml`-prefixed bodies, so the
-   existing body-sniffing guard still catches both, but note the shape is not
-   fixed to one specific S3 error code or status.
-5. **Export status wire values** (§3.1) — established by P5a. Add: begin-response
-   `status` observed as `"inProgress"` (not the spec example's `"complete"`);
-   completed-response `status` observed as `"complete"` (not `"completed"`).
-6. **`listPageContent` response shape** (§2.5, "A synchronous alternative..."
-   section) — established by P9. Correct the description: `style`, `format`,
-   `content`, and `lineLevel` are **not** top-level fields on each content item —
-   they are nested one level down under `item.itemContent`. The current prose
-   ("each with a stable element `id`, a `style`... and a `lineLevel`") reads as
-   flat and should say so nests under `itemContent`.
-7. **§2.1, "The 400 cannot be distinguished by shape"** — established by P2/P3.
-   Add two findings: (a) live evidence that `listPageContent` **does** return the
-   `BadRequestWithValidationErrors`-shaped 400 (`codaType`, `codaDetail.issues`)
-   for a real schema violation, contradicting the claim that no docs/rows/pages/
-   tables/columns operation uses that shape; (b) `X-Coda-Doc-Version` was found to
-   reject *any* non-`latest`, non-empty value with `400 {"message":"Doc is not yet
-   up to date."}`, deterministically and reproducibly, even with no plausible
-   pending mutation — meaning that exact message text cannot be assumed to be the
-   genuine staleness message; it is also what an invalid header value produces.
+The findings from this run have been folded into
+`docs/reference/api-operational-constants.md`: `EXPORT_BUCKET` and the export
+rate-limit bucket question (§1.4, §2.5), `RETRY_AFTER_TRUSTED` (§1.1, §2.2), the
+mutation-polling timing findings behind `MUTATION_404_GRACE_S` and its
+neighbours (§1.3), `EXPORT_LINK_TTL_S` and the corrected expired-link failure
+shape (§1.4, §2.5), the export status wire values (§3.1), the corrected
+`listPageContent` response shape (§2.5), and both P2/P3 findings on the
+400-shape claim in "The 400 cannot be distinguished by shape" (§2.1). None of
+them changed a recommended `Value` in the constants table; where evidence
+conflicted with an existing `[CHOSEN — no evidence, tune later]` recommendation,
+the constants file states the conflict as fact and leaves the number for an
+RFC-owning session to revisit, per the evidence-location convention.

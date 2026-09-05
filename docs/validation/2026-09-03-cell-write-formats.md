@@ -573,8 +573,8 @@ put "$C_REL" '"i-ZZZZZZZZZZ"' ; show "$C_REL"
 ```
 
 - Bare string, count unchanged → confirms silent in-cell corruption with no error and no
-  row created. **Consequence: pre-resolve every relation value and refuse to write on no
-  match.** (Expected.)
+  row created. If confirmed, this would argue for pre-resolving every relation value and
+  refusing to write on no match — a decision for the `tool-surface` topic, not settled here.
 - HTTP 4xx from the PUT (re-run with `-i`) → the API validates; lean on it.
 - Count increased by 1 → Coda auto-creates the target row, refuting the whole body of user
   reports. Surprising, and worth knowing.
@@ -608,8 +608,9 @@ put "$C_REL" "\"$A\""  'disableParsing=true' ; show "$C_REL"   # row ID + parsin
 
 - Name FAILs, ID PASSes → parsing governs *name* resolution only; ID resolution is a
   separate path, and `disableParsing=true` is safe alongside ID writes.
-- Both FAIL → the flag disables relation resolution entirely. **Never send it on a payload
-  touching a relation column.** (This is what thread 24045 predicts.)
+- Both FAIL → the flag disables relation resolution entirely. If confirmed, this would argue
+  for never sending it on a payload touching a relation column — a decision for the
+  `tool-surface` topic, not settled here. (This is what thread 24045 predicts.)
 - Both PASS → the flag does not touch relations at all.
 
 Sanity-check the documented use on a text column while here: writing `"00123"` with
@@ -653,10 +654,11 @@ api "$API/docs/$DOC/tables/$TW/columns/$C_SEL" | jq '.format.options'
 
 Interpretation across T7/T7b:
 
-- Behaviour differs between OFF and ON → **the toggle governs API writes**, exactly as the
-  "parses as if typed" principle predicts. This is a problem: the toggle is **not exposed**
-  in the API's `format` object, so the behaviour is undetectable from the API and the server
-  must validate against `format.options` defensively in every case.
+- Behaviour differs between OFF and ON → the toggle would govern API writes, exactly as the
+  "parses as if typed" principle predicts. That's a problem: the toggle is not exposed
+  in the API's `format` object, so the behaviour would be undetectable from the API — if
+  confirmed, this would be an argument for validating against `format.options` defensively
+  in every case, a decision for the `tool-surface` topic, not settled here.
 - Behaviour identical in both states → the toggle is UI-only. Record which behaviour it is
   (option created / stored as off-list text / rejected).
 - Value appears in `format.options` after the write → the API mutates column schema. An LLM

@@ -5,15 +5,20 @@
 **Status:** RUN on 2026-09-04. All eight probes B1-B8 were executed against a
 scratch package built outside this repository. B1 refuted the claim it tests;
 B2-B8 confirmed theirs. See the Results section for raw output, and the closing
-section for the one claim the `packaging` topic needs to correct.
+section for the one claim this evidence corrected in the `packaging` topic.
 
 ## What this plan settles
 
 The `packaging` topic's SDK claims were verified against a real installed
 `mcp==2.1.1` and are recorded in `docs/reference/mcp-sdk-v2-api-surface.md`. Its
-*build and distribution* claims were not: no `pyproject.toml` was ever created,
-so every assertion about hatchling, wheel contents, console-script naming and
-`uvx` is reasoned rather than executed.
+*build and distribution* claims were not verified the same way: at the time
+this plan was written, every assertion about hatchling, wheel contents,
+console-script naming and `uvx` was reasoned rather than executed. A real
+`pyproject.toml` now exists at the repository root (with `src/superhumandoc_mcp/`
+and a built wheel in `dist/`), but this plan still deliberately tests against
+an isolated scratch copy rather than the in-repo package — by design, not
+because nothing existed to test — so that a failed probe (B1's silent-empty-wheel
+claim, for instance) can't leave the real package in a broken state.
 
 This plan executes them. Each probe below quotes the claim it tests, so a
 failure is unambiguous.
@@ -517,12 +522,15 @@ transport a client actually uses.
 and transport selection happens at `server.run("stdio")` — a `run()`-time
 argument — never on `MCPServer()`'s constructor.
 
-## Claims to correct in the `packaging` topic
+## Claim corrected in the `packaging` topic
 
-- **B1 refutes the packaging topic's claim that omitting
+- **B1 refuted the packaging topic's claim that omitting
   `[tool.hatch.build.targets.wheel] packages` under a `src/` layout "builds an
   empty wheel."** Observed instead: with hatchling 1.32.0 (the version `uv
   build` resolved), omitting that line built a complete, correct wheel — the
   build backend auto-discovered `src/superhumandoc_mcp` from the normalized
   project name and packaged it without error or omission. Neither predicted
-  failure mode (silent empty wheel, or a hard build error) occurred.
+  failure mode (silent empty wheel, or a hard build error) occurred. The
+  `packaging` topic's Decision section has since been corrected to state that
+  the `packages` line is not, on current hatchling, required, crediting this
+  file as the evidence.
