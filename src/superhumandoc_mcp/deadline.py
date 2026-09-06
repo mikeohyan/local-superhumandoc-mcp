@@ -37,6 +37,13 @@ class Deadline:
     def can_afford(self, seconds: float) -> bool:
         return seconds <= self.remaining()
 
+    def clamp(self, candidate_s: float) -> float:
+        """The lesser of a subordinate ceiling and what this deadline has left.
+
+        A subordinate budget may consume what remains and never extend it.
+        """
+        return min(candidate_s, self.remaining())
+
     @property
     def expired(self) -> bool:
         return self.remaining() <= 0.0
