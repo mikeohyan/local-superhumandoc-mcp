@@ -1,11 +1,11 @@
 ---
 rfc: 0005
 title: Expose element-scoped editing tools and gate destructive operations behind a flag
-status: Accepted
+status: Superseded
 created: 2026-09-03
 decided: 2026-09-04
 supersedes:
-superseded_by:
+superseded_by: 0013
 topic: tool-surface
 commits: []
 tags: [architecture, mcp, tools, safety]

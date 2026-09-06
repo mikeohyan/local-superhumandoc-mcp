@@ -1,11 +1,11 @@
 ---
 rfc: 0011
 title: Split oversized batches rather than refusing them, and answer a size refusal by asking for less
-status: Accepted
+status: Superseded
 created: 2026-09-04
 decided: 2026-09-05
 supersedes:
-superseded_by:
+superseded_by: 0014
 topic: request-sizing
 commits: []
 tags: [architecture, http-client, limits, tool-surface]
