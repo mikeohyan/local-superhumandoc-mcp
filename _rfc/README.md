@@ -34,6 +34,21 @@ decision may not yet be accepted.
 | `server-ownership` | 0004 | Implemented | `_rfc/archive/implemented/0004-build-local-doc-scoped-server.md` |
 | `tool-surface` | 0005 | Accepted | `_rfc/0005-tool-surface-and-write-safety.md` |
 
+## Supersedes awaiting a decision
+
+Two proposals below would replace a decision that is currently live. Until one
+is accepted, **the topic table above still names the RFC it would replace** —
+0005 for `tool-surface`, 0011 for `request-sizing` — because that is what the
+project currently does, and a topic must resolve to what is true rather than to
+what is proposed. Accepting one moves the old RFC to `archive/retired/` and
+rewrites its topic row in the same commit; that is the transition, and it is the
+owner's.
+
+| Proposed | Would replace | Topic | Why |
+|---|---|---|---|
+| 0013 | 0005 | `tool-surface` | 0005's own revisit trigger fired: markdown export is not round-trip stable |
+| 0014 | 0011 | `request-sizing` | 0011 denominates one constant in two units, on a premise its own evidence falsified |
+
 ## In flight — `_rfc/`
 
 Proposed and Accepted: decided or awaiting decision, not yet shipped.
@@ -43,6 +58,8 @@ Proposed and Accepted: decided or awaiting decision, not yet shipped.
 | 0005 | Expose element-scoped editing tools and gate destructive operations behind a flag | `tool-surface` | Accepted | 2026-09-04 | `_rfc/0005-tool-surface-and-write-safety.md` |
 | 0011 | Split oversized batches rather than refusing them, and answer a size refusal by asking for less | `request-sizing` | Accepted | 2026-09-05 | `_rfc/0011-request-sizing-and-batch-splitting.md` |
 | 0012 | Poll asynchronous operations on one bounded loop, and give export its own budget | `async-operations` | Accepted | 2026-09-06 | `_rfc/0012-async-operation-polling-and-export-budget.md` |
+| 0013 | Write page content as HTML, and never send a read back as a write | `tool-surface` | Proposed | | `_rfc/0013-html-content-and-the-read-write-cycle.md` |
+| 0014 | Measure a row in the units the API counts, and report what a deadline left undone | `request-sizing` | Proposed | | `_rfc/0014-measure-the-row-instead-of-estimating-it.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
