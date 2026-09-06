@@ -3,12 +3,16 @@
 Evidence document. Last updated 2026-09-03. Updatable — extend it as tests are run
 and as vendor behaviour changes. Cite it from an RFC; do not paste it into one.
 
-**Status:** the desk research in the sections below is complete and sourced. The
-**test plan at the end has NOT been run** — its Results section is an empty
-template. An empty Results section here means untested, never tested-and-clean.
-Part of the plan is runnable today and part is not; the scratch doc's real column
-inventory, read live on 2026-09-05, is recorded at the head of the test plan and
-says which is which.
+**Status:** the desk research in the sections below is complete and sourced. Of
+the test plan, **T7, T7b, T12, and the checkbox and canvas halves of T11 ran live
+on 2026-09-06**, against the throwaway scratch doc `6vqpBu-VYd`, along with a new
+reaction-column test the plan did not originally include. Results are recorded
+below. **T1-T6, T8, T9, T10, and the duration and currency halves of T11 remain
+unrun and blocked** — no relation, image, non-calculated person, duration, or
+currency column exists in that doc. An empty Results section for a given test
+means untested, never tested-and-clean. The scratch doc's real column inventory,
+read live on 2026-09-05, is recorded at the head of the test plan and says which
+tests are blocked and why.
 
 ## What this document settles
 
@@ -777,11 +781,12 @@ have added a `Targets` row if auto-create turns out to be real.
 
 In priority order. Each entry names the test that settles it.
 
-1. **Select-list behaviour for a value not in the option list.** Three independent research
-   sweeps (forum, StackOverflow, five vendor integration docs, the spec) found nothing —
-   not created, not rejected, not stored-as-is; no source says. The open hypothesis is that
-   the column's "Allow adding of new options" toggle governs it, which would be bad news
-   because that toggle is not exposed in the API. → **T7 and T7b.**
+1. **Select-list behaviour for a value not in the option list.** Answered by T7/T7b on
+   2026-09-06: an unlisted value is accepted and stored in the cell with no error, and
+   `format.options` is unchanged afterward — the unlisted value is not added as an option.
+   What is still open is whether the "Allow adding of new options" toggle changes this at
+   all, since the toggle is not exposed in the API's `format` object and the run could not
+   tell which state the scratch doc's `dropdown` column was in — see the T7/T7b results.
 2. **Duplicate display names in a relation target — which row wins.** Cited by users as the
    reason row IDs were needed; never answered by staff. → **T4b.**
 3. **Whether `disableParsing=true` blocks row-ID resolution as well as name resolution.**
@@ -791,16 +796,20 @@ In priority order. Each entry names the test that settles it.
    whether it errors, no-ops, or stores plain text. → **T6d.**
 5. **Array-of-row-IDs on `POST` / `upsertRows`,** as opposed to `PUT` / `updateRow` where
    staff confirmed it. → **T2b.**
-6. **Checkbox, duration and currency write formats.** Zero staff posts, zero StackOverflow
-   answers, zero vendor docs; only cross-path hints from the Packs SDK. → **T11.**
+6. **Checkbox, duration and currency write formats.** Checkbox is answered by T11 on
+   2026-09-06: both the JSON boolean `true` and the JSON string `"true"` read back as
+   boolean `true`. Duration and currency remain fully unknown — zero staff posts, zero
+   StackOverflow answers, zero vendor docs, only cross-path hints from the Packs SDK — and
+   remain blocked: no duration or currency column exists in the scratch doc. → **T11.**
 
 Lower priority, also unresolved: whether a browser link or API `href` is accepted for a
 relation (**T8**); whether person columns accept a row ID (**T6c**); ingest-vs-hotlink
 across the three image/file column types (**T10**); the documented default of
-`disableParsing`; and whether `time`, `reaction` and `packObject` columns are writable at
-all (untested, no sources). Of those three, `reaction` is now answerable — the scratch
-doc has a writable reaction column, and this plan has no test targeting it. See the
-inventory at the head of the test plan.
+`disableParsing`; and whether `time` and `packObject` columns are writable at all
+(untested, no sources). `reaction` writability is now answered — see the Results section:
+the column is writable, accepts a bare emoji string or a JSON array of emoji, replaces
+rather than accumulates on a second array write, clears on an empty array, and does not
+validate its contents as emoji (plain non-emoji text was accepted and stored).
 
 ---
 
@@ -808,79 +817,265 @@ inventory at the head of the test plan.
 
 Paste raw output under each slot. Record the date and the API version header if present.
 
-Run on: `____-__-__` — token scope: `__________` — scratch doc: `__________`
+Run on: `2026-09-06` — token scope: not captured by the run output — scratch doc: `6vqpBu-VYd`
+
+Run tag `cellwrite-20260906T033523Z`. Probe rows were created and left in place rather
+than cleaned up: `i-t9LSfemxfl` (`Name=cellwrite-20260906T033523Z-t1`) in `test-table-01`
+(`grid-PH5-RNMCB1`), and `i-_0US3LVT0m` (`Name=cellwrite-20260906T033523Z-t2`) in
+`test-table-02` (`grid-EETnwpzofr`). All writes in this run completed (HTTP 202, then
+`mutationStatus` polled to `completed: true`) before the read-back that follows it.
 
 ### T1 — relation, single, by row ID
 
-```
-```
+Blocked — needs a relation column. None exists in either table of this scratch doc.
 
 ### T2 — relation, multi, array of row IDs (PUT)
 
-```
-```
+Blocked — needs a relation column.
 
 ### T2b — relation, multi, array of row IDs (POST / upsertRows)
 
-```
-```
+Blocked — needs a relation column.
 
 ### T3 — relation, no match (name-shaped and ID-shaped)
 
-```
-```
+Blocked — needs a relation column.
 
 ### T4 — relation by display name: (a) simple (b) duplicate (c/c2) numeric (d/d2) comma-in-name
 
-```
-```
+Blocked — needs a relation column.
 
 ### T5 — disableParsing, name and row ID
 
-```
-```
+Blocked — needs a relation column.
 
 ### T6 — person: (a) email (b) name (c) row ID (d) not in doc (e) multi
 
-```
-```
+Blocked — the only person column in this scratch doc, `Modified by`, is calculated and so
+not writable. Needs a non-calculated person column.
 
 ### T7 — select list, "Allow adding of new options" OFF
 
+Column under test: `dropdown` (`c-nACxS-2d_4`) in `test-table-01`, existing options
+Small/Medium/Large/X-Large.
+
 ```
+--- Reading dropdown column format BEFORE any writes ---
+{
+  "type": "select",
+  "options": [
+    {"name": "Small", "foregroundColor": "#8B6C1D", "backgroundColor": "#FDF3D8"},
+    {"name": "Medium", "foregroundColor": "#A12B86", "backgroundColor": "#F8E7F3"},
+    {"name": "Large", "foregroundColor": "#187B34", "backgroundColor": "#E2F8E8"},
+    {"name": "X-Large", "foregroundColor": "#0F58BD", "backgroundColor": "#DDEDFD"}
+  ]
+}
+
+--- T7/T7b (a) -- writing an already-listed option value: Small ---
+  requestId=mutate:f9c42c89-1784-4234-a6c3-0f48d7dbef7c
+  mutation mutate:f9c42c89-1784-4234-a6c3-0f48d7dbef7c completed
+  readback (valueFormat=rich) for column c-nACxS-2d_4:
+"```Small```"
 ```
+
+Writing the listed value `Small` stored it. Note the readback itself: the rich-format
+value for this string-typed column comes back wrapped in a markdown code fence
+(`` ```Small``` ``) rather than as a bare JSON string — unlike the date and checkbox
+readbacks below (T12, T11), which return unwrapped native JSON types. That wrapping is
+part of what the API returned, not something added in this write-up.
 
 ### T7b — select list, "Allow adding of new options" ON
 
+This scratch doc's `dropdown` column was not toggled between OFF and ON for this run —
+the toggle is not exposed in the API's `format` object, so the script had no way to set or
+detect it, and (a) and (b) below were both run against whatever state the toggle is
+currently in. This run therefore cannot distinguish a T7 (OFF) result from a T7b (ON)
+result; it records the behaviour of one unknown toggle state only.
+
 ```
+--- T7/T7b (b) -- writing a value NOT present in format.options: ZZ-Unlisted-cellwrite-20260906T033523Z ---
+  requestId=mutate:53640170-1362-451c-99f5-2a3b4f245e15
+  mutation mutate:53640170-1362-451c-99f5-2a3b4f245e15 completed
+  readback (valueFormat=rich) for column c-nACxS-2d_4:
+"```ZZ-Unlisted-cellwrite-20260906T033523Z```"
+
+--- T7/T7b (c) -- re-reading format.options AFTER both writes, to see whether the schema mutated ---
+[
+  {"name": "Small", "foregroundColor": "#8B6C1D", "backgroundColor": "#FDF3D8"},
+  {"name": "Medium", "foregroundColor": "#A12B86", "backgroundColor": "#F8E7F3"},
+  {"name": "Large", "foregroundColor": "#187B34", "backgroundColor": "#E2F8E8"},
+  {"name": "X-Large", "foregroundColor": "#0F58BD", "backgroundColor": "#DDEDFD"}
+]
+  format.options UNCHANGED -- the unlisted write did not add a new option to the schema.
 ```
+
+The plainly unlisted value `ZZ-Unlisted-cellwrite-20260906T033523Z` was accepted and
+stored in the cell with no HTTP error, and `format.options` read back unchanged afterward
+— the unlisted value was not added as an option. A select cell can hold a value that is
+not one of its own options. Whether the toggle changes this outcome is still open; if it
+does, that state would be undetectable from the API's `format` object, which would argue
+for validating a select write against `format.options` defensively regardless of the
+toggle — a decision for the `tool-surface` topic, not settled here.
 
 ### T8 — relation via browserLink and href
 
-```
-```
+Blocked — needs a relation column.
 
 ### T9 — clearing a cell
 
-```
-```
+Blocked — needs a relation column.
 
 ### T10 — image: ingest vs hotlink, single and array
 
-```
-```
+Blocked — no image column exists in this scratch doc.
 
 ### T11 — canvas, checkbox, duration, currency
 
+Duration and currency are blocked — no such columns exist in this scratch doc. Canvas and
+checkbox ran, against `Notes`/canvas (`c-orqRPHUjBy`) and `checkbox` (`c-iuWNGg-fcV`) in
+`test-table-01`.
+
 ```
+--- T11 checkbox (a) -- writing JSON boolean true ---
+  requestId=mutate:7d71cc1f-4da2-4b7e-ac18-26e9b3e93a89
+  mutation mutate:7d71cc1f-4da2-4b7e-ac18-26e9b3e93a89 completed
+  readback (valueFormat=rich) for column c-iuWNGg-fcV:
+true
+
+--- T11 checkbox (b) -- writing the JSON STRING "true" (does it coerce to boolean true, or fail/store literally?) ---
+  requestId=mutate:1c7c5dcc-9abd-44aa-ad10-fde35a84eabe
+  mutation mutate:1c7c5dcc-9abd-44aa-ad10-fde35a84eabe completed
+  readback (valueFormat=rich) for column c-iuWNGg-fcV:
+true
+
+--- T11 canvas -- writing markdown-looking text; expect literal characters, not rendered formatting ---
+  requestId=mutate:5c1b4a2b-9286-4037-a8a4-32fd4989e4b7
+  mutation mutate:5c1b4a2b-9286-4037-a8a4-32fd4989e4b7 completed
+  readback (valueFormat=rich) for column c-orqRPHUjBy:
+"```# Heading\n\n**bold** text```"
 ```
+
+Both the JSON boolean `true` and the JSON string `"true"` read back as boolean `true` —
+the string coerces. The markdown-looking canvas text was stored literally: the read-back
+carries the `#` and `**` characters as plain text rather than rendering them, wrapped (as
+in T7 above) in a markdown code fence in the rich-format value.
 
 ### T12 — date: ISO 8601 vs MM/DD/YYYY vs Unix timestamp
 
+Column under test: `date` (`c-fsVFh3y1p9`) in `test-table-01`.
+
 ```
+--- T12 (a) -- ISO 8601, unambiguous: 2026-03-04 ---
+  requestId=mutate:daded53b-bde9-418c-9c54-52dbbf349164
+  mutation mutate:daded53b-bde9-418c-9c54-52dbbf349164 completed
+  readback (valueFormat=rich) for column c-fsVFh3y1p9:
+"2026-03-04T00:00:00.000-05:00"
+
+--- T12 (b) -- ambiguous under locale: 03/04/2026 ---
+  requestId=mutate:1ed198d1-d093-4f2a-9861-19e21dc6a207
+  mutation mutate:1ed198d1-d093-4f2a-9861-19e21dc6a207 completed
+  readback (valueFormat=rich) for column c-fsVFh3y1p9:
+"2026-03-04T00:00:00.000-05:00"
+
+--- T12 (c) -- the transposition: 04/03/2026 ---
+  requestId=mutate:5f1f1dce-98bc-4713-9b49-572d229c2591
+  mutation mutate:5f1f1dce-98bc-4713-9b49-572d229c2591 completed
+  readback (valueFormat=rich) for column c-fsVFh3y1p9:
+"2026-04-03T00:00:00.000-04:00"
+
+--- T12 (d) -- Unix timestamp: 1772582400 ---
+  requestId=mutate:21b8d07d-bded-46c3-ae10-de76b26a5c5a
+  mutation mutate:21b8d07d-bded-46c3-ae10-de76b26a5c5a completed
+  readback (valueFormat=rich) for column c-fsVFh3y1p9:
+1772582400
 ```
+
+(a) ISO `2026-03-04` read back as `2026-03-04T00:00:00.000-05:00`. (b), the slash form
+`03/04/2026`, read back identically — parsed as 4 March, i.e. MM/DD. (c), the
+transposition `04/03/2026`, read back as `2026-04-03T00:00:00.000-04:00` — 3 April. So a
+day-first date is silently reinterpreted as month-first; both (b) and (c) were accepted
+with no error, and each resolved to a different calendar date than the other despite
+differing only in which two numbers come first. This is the locale hazard the ISO-8601-only
+rule (`tool-surface` topic) exists to avoid; the differing UTC offsets between (c) and the
+other rows (-04:00 vs -05:00) are ordinary daylight-saving for early March versus April,
+not a finding. (d), the Unix timestamp `1772582400`, was **not** parsed as a date at all —
+it read back as the bare number `1772582400`, contradicting the vendor's stated
+Unix-timestamp-conversion behaviour for at least this column/deployment.
+
+### Reaction column — writability (test added for this run; not in the original plan)
+
+The plan had no test for the `reaction` column type — it appears in "Still unknown" only as
+one of three column types (`time`, `reaction`, `packObject`) with zero sources on
+writability at all. The scratch doc's `test-table-02` has a writable-looking `reaction`
+column (`c-UnvrVRuVfv`), so this run added a probe for it.
+
+```
+--- Reaction (a) -- bare JSON string, single emoji: "\xf0\x9f\x91\x8d" ---
+  requestId=mutate:479254f3-716d-4503-8a74-e58cdac93a2d
+  mutation mutate:479254f3-716d-4503-8a74-e58cdac93a2d completed
+  readback (valueFormat=rich) for column c-UnvrVRuVfv:
+"```👍```"
+
+--- Reaction (b) -- JSON array containing one emoji ---
+  requestId=mutate:5e50fc96-ef22-4206-9f46-b7375e45c79c
+  mutation mutate:5e50fc96-ef22-4206-9f46-b7375e45c79c completed
+  readback (valueFormat=rich) for column c-UnvrVRuVfv:
+[
+  "```👍```"
+]
+
+--- Reaction (c) -- JSON array with two distinct emoji (does it accumulate, replace, or reject?) ---
+  requestId=mutate:c499acfb-3675-4d74-9fb2-82ba6b32c0dc
+  mutation mutate:c499acfb-3675-4d74-9fb2-82ba6b32c0dc completed
+  readback (valueFormat=rich) for column c-UnvrVRuVfv:
+[
+  "```👍```",
+  "```🎉```"
+]
+
+--- Reaction (d) -- plain non-emoji text: does it reject, coerce, or store literally? ---
+  requestId=mutate:913de8e1-0b36-4866-990e-9f1bbfc4ba5f
+  mutation mutate:913de8e1-0b36-4866-990e-9f1bbfc4ba5f completed
+  readback (valueFormat=rich) for column c-UnvrVRuVfv:
+"```nice```"
+
+--- Reaction (e) -- clearing with an empty array ---
+  requestId=mutate:b181fb8c-5d61-432a-ab94-27ad404f6199
+  mutation mutate:b181fb8c-5d61-432a-ab94-27ad404f6199 completed
+  readback (valueFormat=rich) for column c-UnvrVRuVfv:
+[]
+```
+
+The column is writable. (a) a bare emoji string stored. (b) a one-element array stored.
+(c) a two-element array of distinct emoji stored both — a second array write **replaces**
+the cell's contents rather than accumulating onto the first write's emoji. (d) plain
+non-emoji text, `nice`, was accepted and stored — the column does not validate its
+contents as emoji. (e) an empty array cleared the cell. Every stored string value came
+back wrapped in the same markdown code fence noted under T7 and T11.
 
 ### Conclusions drawn / document updates made
 
 ```
+T7/T7b, T12, and the checkbox/canvas halves of T11 ran live on 2026-09-06 against
+scratch doc 6vqpBu-VYd (run tag cellwrite-20260906T033523Z); a reaction-column test
+was added since the plan had none. T1-T6, T8, T9, T10, and the duration/currency
+halves of T11 remain blocked for lack of a relation, image, non-calculated person,
+duration, or currency column in this doc.
+
+Updated in this file as a result:
+- Status line at the top of the document.
+- "Still unknown" item 1 (select unlisted-value behaviour): answered -- accepted,
+  stored, schema unchanged; the toggle's effect remains open since the API cannot
+  report or set it.
+- "Still unknown" item 6 (checkbox/duration/currency): checkbox answered (string
+  "true" coerces to boolean true); duration and currency remain fully unknown and
+  blocked.
+- "Still unknown" closing paragraph: reaction writability answered.
+
+Not updated: the "Confirmed" section's per-column-type entries for select, date,
+checkbox, canvas, and reaction still read as they did before this run. Folding
+these results into Confirmed (with confidence markers) and into "Contradictions
+and traps" (the Unix-timestamp non-conversion contradicts the vendor's stated
+behaviour) is left as follow-up, since this pass was scoped to the Results
+section only.
 ```

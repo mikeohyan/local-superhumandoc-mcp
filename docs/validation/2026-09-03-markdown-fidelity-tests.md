@@ -2,13 +2,12 @@
 
 **Date:** 2026-09-03
 **Target:** `https://docs.superhuman.com/apis/v1` (formerly Coda API v1; specs are byte-identical)
-**Status:** NOT YET RUN. B3, B4 and B5 each create their own fresh page through
-`POST /docs/{docId}/pages` and are runnable today. B1, B2 and B6 are blocked:
-they require the manual browser setup described under "Manual browser prep"
-below — a scratch page containing a real table, button, formula control,
-callout, divider, image, collapsible list and pull quote, duplicated twice in
-the UI to produce SCRATCH-A/B/C — which does not yet exist. See the empty
-Results section at the bottom.
+**Status:** B3, B4 and B5 ran on 2026-09-06 against a throwaway scratch doc —
+see the Results section at the bottom. B1, B2 and B6 remain blocked: they
+require the manual browser setup described under "Manual browser prep" below —
+a scratch page containing a real table, button, formula control, callout,
+divider, image, collapsible list and pull quote, duplicated twice in the UI to
+produce SCRATCH-A/B/C — which does not yet exist.
 
 ## Before you run this
 
@@ -50,24 +49,24 @@ Confidence markers: **[S]** confirmed by Coda/Superhuman staff or first-party do
 
 | Markdown construct | Supported on write? | Preserved on export to markdown? | Round-trip stable? |
 |---|---|---|---|
-| `#`/`##`/`###` (h1-h3) | Yes — native `h1/h2/h3` **[S]** (PageLineStyle enum + help center "three heading sizes") | Yes **[C]** | Likely, but ATX-vs-setext and trailing-`#` normalization untested **[?]** |
-| `####`-`######` (h4-h6) | **No native target exists** — canvas has exactly 3 levels **[S]**. Must degrade: clamp->h3, bold paragraph, or literal `####` text. Which one is **undocumented** **[?]** | n/a | **No.** Guaranteed unstable **[S]** on the cause, **[?]** on the exact output |
-| `**bold**`, `*italic*` | Yes — native; first-party MCP lists "Inline formatting: bold, italic" **[S]** | Yes **[C]** | Delimiter normalization (`*` vs `_`) untested **[?]** |
-| `~~strikethrough~~` | **Conflict.** Strikethrough is native in the canvas (Ctrl+Shift+K) **[S]**, but `~~` is *extended* syntax and the importer is documented basic-syntax-only **[S]**. Likely literal `~~text~~` **[?]** | If it lands as struck text, export emission unknown **[?]** | Unknown **[?]** |
-| `` `inline code` `` | Basic syntax + native inline code **[S]** -> very likely yes **[C]** | Likely **[C]** | Likely **[?]** |
-| `[text](url)` links | Basic syntax; staff-confirmed markdown works for pages **[S]** | Yes — export "works fine for text, links" **[S]** | Reference-style links almost certainly normalized to inline **[?]** |
-| `![alt](url)` images | Probably creates an image block **[?]** — first-party MCP treats `image` as its own `blockType` needing `content_image_upload`, implying markdown image syntax is not the sanctioned path **[C]** | **NO — omitted from markdown export** (staff-confirmed for page-level attachments; HTML export keeps them) **[S]** | **No. Write-then-read loses the image.** Clearest confirmed asymmetry **[S]** |
-| GFM tables (`\| a \| b \|`) | Extended syntax, not in the supported flavor **[S]**; first-party guidance is "prefer `table_create` over Markdown tables" **[S]**. Likely literal text or flattened paragraphs, **not** a Coda table **[C]** | Native Coda tables in markdown export: **undocumented by anyone** **[?]** — but `content_read` separates `markdown` from `tables`, implying markdown alone does not carry table data **[C]** | **Assume no** **[C]** |
-| `---` / `***` horizontal rule | Divider is a native block (MCP `blockType: divider`) **[S]**, so `---` probably makes one **[?]**. Trap: `---` after a text line is a **setext H2** in CommonMark | Divider is **absent from PageLineStyle** -> the cheap read cannot see it **[S]**; markdown export emission unknown **[?]** | Unknown **[?]** |
-| Fenced code ` ```lang ` | Code block is native with a 100+ language enum **[S]**; fences are technically extended syntax **[S]** -> conflict, likely works but language tag may drop **[?]** | Likely as a fence **[?]** | Language attribute preservation untested **[?]** |
-| `> blockquote` | Yes — native `blockQuote` **[S]** | Yes **[C]** | Nested `> >` probably flattened to one level + `lineLevel` **[?]** |
-| Nested lists | Native (`lineLevel` "for indentable elements") **[S]** | Yes **[C]** | Indent width (2 vs 4 spaces) and marker normalization (`*`/`+` -> `-`) untested — **likeliest silent normalization** **[?]** |
-| Ordered lists | Native `numberedList` **[S]** | Yes **[C]** | Start-number (`3.`) and lazy numbering almost certainly renumbered **[?]** |
-| `- [ ]` task lists | Native `checkboxList` exists **[S]**, but `- [ ]` is extended syntax **[S]** -> conflict, must test **[?]** | Unknown **[?]** | Unknown **[?]** |
-| Footnotes `[^1]` | Extended syntax, **no native equivalent** -> literal text or dropped **[C]** | n/a | **No** |
-| LaTeX / `$...$` math | No native math block (packs only) **[S]** by absence from the block list -> literal text **[C]** | n/a | **No** |
-| `@mentions` / page refs | No markdown syntax; native mentions exist. Writing `@Name` yields literal text **[C]** | Existing mentions probably flatten to text or a link **[?]** | **No** |
-| Raw HTML inside markdown | Undocumented **[?]** | — | — |
+| `#`/`##`/`###` (h1-h3) | Yes — native `h1/h2/h3` **[S]** (PageLineStyle enum + help center "three heading sizes") | Yes — confirmed by B3, byte-identical text | Confirmed by B3: a setext H1 (`Setext H1` / `=========`) is written as ATX `# Setext H1` on export — no setext form survives. h1-h3 content itself round-trips unchanged |
+| `####`-`######` (h4-h6) | **No native target exists** — canvas has exactly 3 levels **[S]**. Confirmed by B3: markdown h4-h6 write as plain paragraph text, heading text intact, no bold and no clamping to h3 (`T_content.json` shows `"style":"paragraph"`) | n/a — no heading style survives on export via either write path | **No.** Confirmed unstable, and the exact degradation depends on write format: plain paragraph via markdown (B3), but `### **bold**` (h3-level, bolded text) via HTML (B4) |
+| `**bold**`, `*italic*` | Yes — native; first-party MCP lists "Inline formatting: bold, italic" **[S]** | Yes — confirmed by B3 | Confirmed stable by B3: `**bold**` and `*italic*` delimiters are preserved unchanged, no `_` substitution observed |
+| `~~strikethrough~~` | Confirmed by B3: accepted and produces real struck text despite the basic-syntax-only documentation | Confirmed by B3: exports back as `~~strikethrough~~` | Confirmed stable by B3 |
+| `` `inline code` `` | Confirmed by B3 | Confirmed by B3: exports unchanged | Confirmed stable by B3 |
+| `[text](url)` links | Basic syntax; staff-confirmed markdown works for pages **[S]** | Yes — export "works fine for text, links" **[S]** | Confirmed by B3: inline links round-trip unchanged; a reference-style link (`[link][ref]`) normalizes to inline on export; an autolink (`<https://example.com>`) and a bare URL both come back rewritten as `[https://example.com](https://example.com)` |
+| `![alt](url)` images | Confirmed by B3: accepted on markdown write | Corrected by B3 — **not omitted.** Comes back as `[alt text](url)`: the leading `!` is dropped and the title attribute is lost, so it silently degrades into a plain link rather than disappearing. (The earlier "omitted from export" note concerns page-level *attachments*, a different object from an inline image in `canvasContent` — see the corrected note below.) Confirmed by B4: the same image written as HTML `<img>` is instead dropped from the export entirely, with no link left behind | **No.** Confirmed unstable, and unstable in two different ways depending on write format |
+| GFM tables (`\| a \| b \|`) | Corrected by B3 — a markdown pipe table **does** create a real native Coda table (`grid-D53nA4DcMR`), contrary to the "likely literal text" assumption | Confirmed by B3, with a defect: export **demotes the real header row to a data row** and synthesizes a generic `Column 1`/`Column 2` header above it. Confirmed by B4: writing the equivalent `<table>` as HTML instead keeps the true header row (`Column A`/`Column B`), with no synthesized header. Confirmed by B3: the table is invisible to the page-content read either way — no table/grid item appears among `T_content.json`'s items at all | **No.** Confirmed by B5: a second write-export cycle over the already-corrupted table adds another copy of the synthesized header as a further data row — each cycle grows the table |
+| `---` / `***` horizontal rule | Confirmed by B3: none of `---`, `***`, `___` (each on its own blank-line-separated line) produced a divider or any other visible construct — no corresponding item appears in `T_content.json` | Confirmed by B3: **all three vanish entirely** from the markdown export. The setext-H2 trap (`---` directly after a text line, no intervening blank line) was not exercised — torture.md put a blank line before each rule — so that specific case is still **[?]** | **No** — and unstable across generations too: B5 shows the blank-line residue gen-1 left behind shrinks further at gen-2 |
+| Fenced code ` ```lang ` | Confirmed by B3: `` ```python `` writes as a native code block | Confirmed by B3: exports back as a fence with the language tag intact. Confirmed by B4: writing the same code as HTML (`<pre class="python">`) **loses the language tag** — exports as a bare fence | Confirmed stable via markdown write (B3); confirmed to drop the tag via HTML write (B4) |
+| `> blockquote` | Yes — native `blockQuote` **[S]** | Confirmed by B3 | Confirmed by B3: nested `> >` flattens to a single level (both lines come back as plain `>` quotes at the same level). Confirmed by B5 to decay further: on a second write-export cycle the flattened quote's continuation line loses its `>` marker entirely and becomes an unquoted paragraph line |
+| Nested lists | Native (`lineLevel` "for indentable elements") **[S]** | Confirmed by B3 | Confirmed by B3: three nesting levels survive with 2-space-per-level indentation; all bullet markers (`*`, `+`, `-`) normalize to `-` |
+| Ordered lists | Native `numberedList` **[S]** | Confirmed by B3 | Confirmed by B3: a list starting at `5.` is renumbered to `3.` (continuing the outer sequence), and lazy numbering (`1.` repeated) is renumbered to `4.` — sequential renumbering, not preserved as written |
+| `- [ ]` task lists | Confirmed by B3: creates real native `checkboxList` items (`T_content.json`), despite the basic-syntax-only documentation | Confirmed by B3: exports back as literal `- [ ]` / `- [x]` | Confirmed stable via markdown write (B3). Confirmed by B4 to differ sharply via HTML write: `<input type="checkbox">` list items lose the checkbox entirely on export, leaving bare list items with no `[ ]`/`[x]` marker at all |
+| Footnotes `[^1]` | Confirmed by B3: `[^1]` and its `[^1]: body` definition pass through as literal text, unrecognized | Confirmed by B3: literal text, unchanged | **No** — not a construct via markdown write. Confirmed by B4 to differ via HTML write: real footnote HTML (`<a href="#fn1">` / footnotes section) is not reconstructed as `[^1]` syntax on export — it comes back as a plain markdown link (`[#fn1](#fn1)`) |
+| LaTeX / `$...$` math | Confirmed by B3: both inline `$E = mc^2$` and block `$$...$$` pass through as literal text | Confirmed by B3: literal text, unchanged (aside from incidental hard-break whitespace added around the block form) | **No** — not a construct |
+| `@mentions` / page refs | Confirmed by B3: `@Someone` and `#Tag` both pass through as literal text, not created as real mentions/tags | Confirmed by B3: literal text, unchanged | **No** — not a construct |
+| Raw HTML inside markdown | Confirmed by B3: a `<div class="raw-html"><b>...</b></div>` block written inside markdown content passes through as literal text, tags and all | Confirmed by B3: literal text, unchanged. Confirmed by B4 to differ when the *page itself* is written as HTML: the same div is not preserved as raw HTML on export — it flattens to `**raw html block**`, keeping only the `<b>` as markdown bold | **No** — behavior differs by write format |
 | Text color / highlight | **Explicitly unsupported** in the markdown flavor **[S]**; first-party MCP uses proprietary tags **[S]** | Lost **[S]** | **No** |
 | Underline | Native inline style, **no markdown syntax at all** **[S]** | Lost **[C]** | **No** |
 
@@ -75,9 +74,9 @@ Confidence markers: **[S]** confirmed by Coda/Superhuman staff or first-party do
 
 | Native object | What markdown export does |
 |---|---|
-| Tables / views | Undocumented. `content_read` exposes `tables` separately from `markdown` **[S]** -> infer markdown does not faithfully carry them **[C]**. Rendered / flattened / omitted is **the biggest untested unknown** **[?]** |
-| Buttons, controls, formula chips | Separate `controls` / `formulas` content types **[S]**; separate `/docs/{docId}/controls` and `/formulas` endpoints **[S]** -> almost certainly flattened to a value or omitted **[C]** |
-| Images / page attachments | Omitted from markdown export, present in HTML export **[S]** — see `docs/reference/api-operational-constants.md` §2.5 |
+| Tables / views | Corrected by B3/B4 — a markdown or HTML pipe/`<table>` write **creates a real native Coda table** (confirmed grid objects `grid-D53nA4DcMR` and `grid-vSs9GXsAi0`), not a flattened/omitted rendering. It is invisible to the page-content read (no item for it appears among `T_content.json`'s items). Confirmed by B3: its header row is corrupted on a markdown round trip — demoted to a data row under a synthesized `Column 1`/`Column 2` header, and B5 confirms this worsens by one duplicate row per further write-export cycle. A table written via HTML instead keeps its true header row (B4) |
+| Buttons, controls, formula chips | Separate `controls` / `formulas` content types **[S]**; separate `/docs/{docId}/controls` and `/formulas` endpoints **[S]** -> almost certainly flattened to a value or omitted **[C]**. Not exercised by B3/B4/B5 — torture.md/torture.html contained no button, control or formula chip; still **[?]** |
+| Images / page attachments | Page-level *attachments* are omitted from markdown export, present in HTML export **[S]** — see `docs/reference/api-operational-constants.md` §2.5. That is a different object from an inline image written via `canvasContent`: confirmed by B3, an inline `![alt](url)` markdown image is **not** omitted on export — it degrades to a plain link (`!` and title dropped). Confirmed by B4: the same inline image written as HTML `<img>` **is** dropped entirely from the markdown export, with no trace |
 | Callouts | Native block **[S]**, not in `PageLineStyle` **[S]** -> flattened in the cheap read; markdown export emission unknown **[?]** |
 | Pull quotes, collapsible lists | In `PageLineStyle` (cheap read sees them) **[S]** but **no markdown syntax** -> downgraded on export **[C]**, unrecreatable from markdown **[S]** |
 | Dividers | Not in `PageLineStyle` at all **[S]** |
@@ -391,14 +390,17 @@ md_export "$C" C_after.md
 
 ## B7. What each outcome means for the tool set
 
-| Result | Action |
-|---|---|
-| B1 destroys the table | `replace` without `elementId` becomes an opt-in `overwrite_page` with the tables/controls/formulas guard; `edit_page` never uses it |
-| B2 diff is non-empty | Do not offer whole-page RMW at all; anchored `elementId` edits only |
-| B5 not idempotent | Same, plus warn the model that repeated edits degrade the page |
-| B3 shows table/image loss on export | `read_page` description must state markdown omits tables and images, and should offer an `include_tables` path via `/docs/{docId}/tables` |
-| B4 shows HTML wins | Accept markdown from the model, convert to HTML before writing |
-| B6 IDs churn across writes | Re-fetch `/content` immediately before each anchored write |
+Each row below states what an outcome would bear on. None of them is decided
+here — what the client does about any of it belongs to the `tool-surface` topic.
+
+| Result | Status | What it bears on |
+|---|---|---|
+| B1 destroys the table | unrun | Whether a whole-page replace can exist at all without the tables/controls/formulas guard in front of it |
+| B2 diff is non-empty | unrun | Whether whole-page read-modify-write is viable, or only `elementId`-anchored edits |
+| B5 not idempotent | **confirmed 2026-09-06** | Same question, sharpened: the drift is not a one-time normalization that settles. A table gains a row per cycle, so the damage accumulates with the number of edits rather than with their size |
+| B3 shows table/image loss on export | **refuted as stated, 2026-09-06** | The premise was wrong in both halves. A markdown pipe table is not lost — it becomes a real native table object. An inline image is not omitted — it degrades to a link. The real losses are narrower and stranger: the table's *header row* is demoted to data, and horizontal rules disappear entirely |
+| B4 shows HTML wins | **partly confirmed 2026-09-06** | HTML wins on tables and only on tables — it alone preserves the header row. It loses the code-fence language tag, destroys task-list checkboxes, and drops images outright. Any format choice is a trade rather than a win |
+| B6 IDs churn across writes | unrun | Whether an anchored write can reuse an element id it read earlier, or must re-resolve first |
 
 **Total runtime** ~12-15 min, dominated by export polling (~5-10 s per export, 8 exports) and the one-time manual page setup.
 
@@ -408,9 +410,9 @@ md_export "$C" C_after.md
 
 > Paste actual output below once the plan is run. Record the date, the token's workspace/plan tier, and the doc used.
 
-**Run date:** _not yet run_
-**Run by:**
-**Doc / workspace:**
+**Run date:** 2026-09-06 (B3, B4 and B5 only — B1, B2 and B6 remain blocked, see Status above)
+**Run by:** Mike Yan
+**Doc / workspace:** throwaway scratch doc, docId `6vqpBu-VYd` (from the `T_content.json` `href`); token workspace/plan tier not captured for this run
 
 ## B1 — blunt `replace` vs native objects
 
@@ -432,30 +434,206 @@ _Evidence:_
 
 ## B3 — markdown torture write/export
 
-_Verdict per construct (fill in the fidelity table above with confirmed values):_
-_Evidence:_
+_Verdict per construct:_ recorded directly in the fidelity table above — every
+row previously marked as an untested assumption is now either confirmed or
+narrowed to the specific sub-case still untested.
+
+_Evidence:_ Page `canvas--WjjZil_19` (name `TORTURE-MD`), created from
+`torture.md`. Key excerpts from the diff between the write input (`torture.md`)
+and the read-back export (`T_out.decompressed.md`):
 
 ```
-(paste mutationStatus warning, T_out.md, the T_content.json style listing)
+-#### H4 heading
+-##### H5 heading
+-###### H6 heading
++H4 heading
++H5 heading
++H6 heading
+
+-Setext H1
+-=========
++# Setext H1
+
+-an escaped \*asterisk\* plus an &amp; entity.
++an escaped *asterisk* plus an & entity.
+
+-reference [link][ref], autolink
+-<https://example.com>, and bare https://example.com
++reference [link](https://example.com), autolink
++[https://example.com](https://example.com), and bare [https://example.com](https://example.com)
+
+-![alt text](https://placehold.co/120x40.png "image title")
++[alt text](https://placehold.co/120x40.png)
+
+-* star bullet one
+-* star bullet two
+-+ plus bullet
++- star bullet one
++- star bullet two
++- plus bullet
+
+-5. ordered starting at five
+-1. lazy numbering
++3. ordered starting at five
++4. lazy numbering
+
+-> blockquote level one
+-> > nested blockquote level two
++> blockquote level one
++> nested blockquote level two
+
+-    indented code block (four spaces)
++```
++indented code block (four spaces)
++```
+
+-| Column A | Column B |
+-| -------- | -------- |
++| Column 1 | Column 2 |
++| --- | --- |
++| Column A | Column B |
+
+-Horizontal rules follow, each on its own separated line:
+-
+----
+-
+-***
+-
+-___
+-
+-Final paragraph.
++Horizontal rules follow, each on its own separated line:
++(six blank lines, no divider, no trace of --- / *** / ___)
++Final paragraph.
 ```
+
+The backslash-escaped `\*asterisk\*` coming back as unescaped `*asterisk*` is
+significant beyond the character diff: a further round trip through any
+markdown parser would read that as italic text, not a literal asterisk.
+
+Definition list, footnote reference/body, math (inline and block), the
+`@mention`/`#Tag` line, and the raw `<div>` block all came back byte-identical
+as literal text — the write did not recognize or alter them.
+
+`T_content.json` (the cheap page-content read) confirms: the task-list lines
+carry `"style":"checkboxList"` (a real native construct, not literal text); the
+h4-h6 lines carry `"style":"paragraph"` (not `"h3"`, not bold); the two
+blockquote lines are both `"style":"blockQuote"` with no level distinction; and
+critically, **no item of any style corresponds to the table** the same write
+created (`grid-D53nA4DcMR`, "Table 1") — the table is completely absent from
+this listing, confirming it is invisible to the cheap read.
+
+`MutationStatus.warning` was not captured in the artifacts for this run — no
+mutation-status response was saved alongside the other B3 files — so whether
+the constructs markdown does not understand (definition list, footnotes, math,
+raw HTML, mentions) produced a warning or total silence remains unknown.
 
 ## B4 — HTML vs markdown write format
 
-_Verdict:_
-_Evidence:_
+_Verdict:_ HTML wins on the one construct it was tested for a reason to win on
+(the table's header row) and loses on several others; it is not a categorical
+improvement over markdown as a write format.
 
-```
-(paste diff -u T_out.md TH_out.md, and whether a native table appeared)
-```
+_Input note:_ pandoc was not available in this environment
+(`pandoc -f markdown -t html` had no binary to run), so `torture.html` was
+**hand-authored** to mirror `torture.md`'s constructs one for one — it was not
+produced by converting `torture.md` with pandoc. A reader comparing B3 and B4
+should treat `torture.html` as an independently written approximation of the
+same test cases, not a mechanical pandoc translation, and allow for that when
+weighing any difference between the two runs.
+
+_Evidence:_ Page `canvas-ceyUJcCKU8` (name `TORTURE-HTML`), created from
+`torture.html`; exported to `H_out.md`. Notable differences from B3's
+`T_out.decompressed.md`:
+
+- **Table.** `<table><thead><tr><th>Column A</th>...` exports as
+  `## Table 2` / `| Column A | Column B |` / `| --- | --- |` / data rows — the
+  true header row is kept, unlike the markdown-written table's synthesized
+  `Column 1`/`Column 2` header (B3). This is the one clear advantage found.
+  Against it: a `## Table 2` heading is injected above the table that did not
+  exist in the input.
+- **Fenced code.** `<pre class="python">` exports as a bare ` ``` ` fence — the
+  `python` language tag is lost (B3's markdown write kept it).
+- **Task lists.** `<li><input type="checkbox" disabled>` / `checked` export as
+  `-  unchecked task` / `-  checked task` — the checkbox state is destroyed,
+  leaving bare list items with no `[ ]`/`[x]` marker at all.
+- **Image.** `<img src="..." alt="alt text" title="image title" />` is
+  **dropped entirely** from the export — no link, no alt text, nothing. This is
+  a worse outcome than the markdown write's degrade-to-link behavior (B3).
+- **h4-h6.** `<h4>`/`<h5>`/`<h6>` export as `### **H4 heading**` /
+  `### **H5 heading**` / `### **H6 heading**` — an h3-level heading wrapping
+  bolded text, rather than B3's plain-paragraph demotion.
+- **Stray whitespace.** The export is littered with lines containing only a
+  single space character — confirmed by byte inspection (`0x20 0x0a`, an
+  ordinary ASCII space, not a non-breaking space) — 29 such lines in
+  `H_out.md`, one apparently per HTML block-level element boundary.
+- **Footnote / definition list.** The `<a href="#fn1">…</a>` /
+  `<section class="footnotes">` markup is not reconstructed as `[^1]` syntax on
+  export — it comes back as a plain markdown link (`[#fn1](#fn1)`). The
+  `<dl><dt><dd>` definition list flattens to a single line
+  (`  Term definition list item  `), losing the colon-definition form.
+- **Raw HTML.** The hand-written `<div class="raw-html"><b>raw html
+  block</b></div>` (here an ordinary content element, since the whole page is
+  HTML) flattens to `**raw html block**` — the div is discarded but the `<b>`
+  survives as markdown bold.
 
 ## B5 — round-trip idempotence (gen2)
 
-_Verdict:_
-_Evidence:_
+_Verdict:_ **Not a fixed point — the most consequential result of this run.** A
+second write-export cycle over gen-1's already-normalized markdown introduces
+new, different changes rather than reproducing gen-1 exactly.
+
+_Evidence:_ Page `canvas-JyBW6sOWuB` (name `TORTURE-GEN2`), created by feeding
+B3's export (`T_out.decompressed.md`) back in as the write. Exported to
+`G2_out.md`. The diff between gen-1 and gen-2 is confined to three places:
 
 ```
-(paste diff -u T_out.md G_out.md)
+-> blockquote level one
+-> nested blockquote level two
++> blockquote level one  
++nested blockquote level two
 ```
+The flattened blockquote's continuation line loses its `>` marker entirely on
+the second cycle — it is no longer quoted at all.
+
+```
+ | Column 1 | Column 2 |
+ | --- | --- |
++| Column 1 | Column 2 |
+ | Column A | Column B |
+ | a1 | b1 |
+ | a2 | b2 |
+```
+The synthesized header row is duplicated as a second data row. This is the
+finding that compounds: each read-modify-write cycle over a page containing a
+table adds another copy of the bad header — it does not stabilize after one
+normalization pass, it keeps growing.
+
+```
+ Horizontal rules follow, each on its own separated line:
+-
+-
+-
+-
+-
+-
+ Final paragraph.
+```
+The six blank lines gen-1 left behind where the three horizontal rules vanished
+collapse to zero at gen-2 — further drift, not stabilization.
+
+Everything else in the diff is empty: headings, lists, code fences, task-list
+markers, links, and the literal-text constructs (footnote, math, mentions, raw
+HTML) are unchanged between gen-1 and gen-2.
+
+One transport-level fact surfaced while running this test: the export's
+`downloadLink` serves the content with `Content-Encoding: gzip` and
+`Content-Type: text/plain` — confirmed directly, since `T_out.md` and
+`T_out.html` on disk are themselves gzip streams (`file` reports "gzip
+compressed data"), not plain text, despite the `.md`/`.html` extension. A
+client that does not decompress the download gets binary. This bit the first
+run of this test: the raw gzip bytes were nearly re-posted as the gen-2 page
+content before the mistake was caught.
 
 ## B6 — elementId-scoped replace
 

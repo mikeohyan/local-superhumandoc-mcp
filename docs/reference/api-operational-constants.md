@@ -179,14 +179,20 @@ This entry previously asserted the same thing without a citation; it now has one
 ## 1.3 Asynchronous mutation polling
 
 **Row writes are slower to complete than page-content writes** [observed
-2026-09-04]. A single-row `upsertRows` carrying a fifteen-character value reported
-`completed:false` on every poll until between t=21.9 s and t=23.0 s. A six-row
-`deleteRows` on the same table completed in about twelve seconds. Probe P4's
-16–18 s figure was a page-content append, so the row path is the slower of the two,
-not a proxy for it — any budget reasoning that assumed otherwise is optimistic.
+2026-09-04, corroborated 2026-09-06]. A single-row `upsertRows` carrying a
+fifteen-character value reported `completed:false` on every poll until between
+t=21.9 s and t=23.0 s. A six-row `deleteRows` on the same table completed in about
+twelve seconds. A second run against the scratch doc, polling at 2-second
+intervals, saw the same shape: a row insert reported `completed: true` at about
+20 seconds and a row delete at about 10 seconds. Probe P4's 16–18 s figure was a
+page-content append, so the row path is the slower of the two, not a proxy for it
+— any budget reasoning that assumed otherwise is optimistic.
 Note also that the status body was `{"completed":false}` with **no `warning` key at
 all**, where P4 recorded `{"completed": false, "warning": null}`; a client must
-treat the field as absent rather than null.
+treat the field as absent rather than null. Every intermediate poll in the
+2026-09-06 run confirmed the same thing — no `warning` key on any
+`{"completed":false}` response — so the field's absence, as distinct from null, is
+now observed across two independent runs rather than one.
 
 
 | Constant | Value | Marker | Justification |
@@ -275,8 +281,9 @@ And on what it actually buys, same post:
 centre, every staff post, and all public code referencing it. Any other value is
 untested — see probe P2.
 
-**The 400 usually cannot be distinguished by shape, and the spec is not why**
-[SPEC-VERIFIED, corrected by live observation 2026-09-04]. The spec declares two 400
+**The 400's shape varies by endpoint in both directions, and the spec does not
+predict it** [SPEC-VERIFIED, corrected by live observation 2026-09-04, sharpened
+2026-09-06]. The spec declares two 400
 schemas: `BadRequestError` (bare `{statusCode, statusMessage, message}`) and
 `BadRequestWithValidationErrors` (adds `codaDetail.validationErrors`). The latter is
 referenced by 49 operations — **all of them Packs, Pack-logs, or agent-logs
@@ -287,10 +294,21 @@ and a malformed-request 400 are byte-identical on every endpoint this project
 touches. **Probe P3 refuted it.** `listPageContent`
 (`GET /docs/{docId}/pages/{pageId}/content`) returns a
 `codaType`/`codaDetail.issues`-bearing 400 for a real schema violation (tested:
-`contentFormat=bogusFormat`), despite declaring no such schema. What the spec
-declares is therefore a floor on what an endpoint may return, not a description of
-what it does return — a discriminator can be present where the spec promises none,
-so its absence can be relied on and its presence cannot.
+`contentFormat=bogusFormat`), despite declaring no such schema — a discriminator
+present where the spec promises none. **Probe P3's control, run 2026-09-06 against
+`listRows` with the documented-unsatisfiable combination
+`sortBy=natural&visibleOnly=false`, went the other way**: it returned a **bare**
+`{statusCode, statusMessage, message}` 400 with **no** discriminator, byte-identical
+with and without the `X-Coda-Doc-Version: latest` header. An invalid sync token on
+the same endpoint likewise came back bare (`"Invalid pageToken."`). So the
+discriminator's presence is not something the spec's declared schema settles either
+way: it can appear where none is promised (`listPageContent`), and it can also stay
+absent exactly where none is promised (`listRows`) — neither presence nor absence
+can be predicted from the spec at all, only measured per operation. The `listRows`
+message text was, however, long and specific — *"Natural sorting is only available
+for visible rows..."* — which is a weaker and different kind of signal than a
+structured field: distinctive prose can help a human reading logs, but it is not
+something a client can safely match on the way it would a `codaType`.
 
 Separately, and more consequentially:
 `X-Coda-Doc-Version` was found to reject **any value other than the literal string
@@ -606,14 +624,18 @@ exhaustive negative search]
   expose it.
 - The help centre has no article on it. No staff member has ever posted about it.
 
-**Deleted rows: structurally cannot be reported.** [SPEC-VERIFIED] `RowList.items`
+**Deleted rows: structurally cannot be reported, and this is now also directly
+observed.** [SPEC-VERIFIED, confirmed by live observation 2026-09-06] `RowList.items`
 is `Row[]`; `Row` is `additionalProperties: false` with
 `required: [id, type, href, name, index, browserLink, createdAt, updatedAt, values]`.
 There is no `deleted`/`tombstone` field, and a deleted row could not supply
 `values`, `index`, or `browserLink`. **A deleted row therefore cannot appear in a
-sync delta at all — the schema has no field that could represent one.** What a
-client should do about that is the open decision recorded at the end of this
-section.
+sync delta at all — the schema has no field that could represent one.** **Probe
+P8, 2026-09-06**, confirmed this live rather than by schema-reasoning alone: a row
+was inserted, a sync token minted, the row deleted, and the delta read 60 seconds
+later returned `count: 0` with an empty `ids` array — no mention of the deleted row
+anywhere in the response. What a client should do about that is the open decision
+recorded at the end of this section.
 
 **Expiry and invalidation: no error string exists to quote.** [SPEC-VERIFIED on the
 shape] `listRows` declares 400/401/403/404/429 and notably **no 410**, in contrast
@@ -806,6 +828,17 @@ code and S3 error code than the `NoSuchKey`-on-200 shape above, but the same
 failure family (an `<?xml`-prefixed body). Both shapes must be treated as
 fatal-for-this-link; do not assume the failure is always disguised behind a 200.
 
+**A successful download is gzip-encoded, not plain text** [SPEC-VERIFIED by live
+probe, 2026-09-06]. The response behind a live `downloadLink` carried
+`Content-Encoding: gzip` and `Content-Type: text/plain`, with `Content-Length`
+reporting the **compressed** size — 761 bytes for a 1,424-byte markdown export. A
+client that saves the response body without decompressing it gets gzip bytes, not
+the exported text. This was observed directly: a first run wrote the raw bytes to
+a file and `file(1)` identified it as "gzip compressed data". A gzip body is
+therefore a third possible shape behind the link, alongside the valid content it
+appears to be and the XML error document above — which of the three a given
+response is stays unresolved until it is decompressed.
+
 **The download host is not the API host** [SPEC-VERIFIED by live probe].
 `https://docs.superhuman.com/blobs/DOC_EXPORT_RENDERING/…` is served by the web app,
 not the API pod: it returns none of `x-coda-server: api` / `x-coda-pod` that every
@@ -936,7 +969,9 @@ Facts, in the order a caller meets them.
     previously documented shape was `200` with `<Code>NoSuchKey</Code>`. Both are
     `<?xml`-prefixed, which is the one property common to every observed form.
     This matters because such a body is a plausible-looking string that is not page
-    content.
+    content. A live link is a third shape again, not a second: the body is
+    gzip-compressed bytes served with `Content-Type: text/plain` (§2.5), which is
+    neither the XML above nor readable text until it is decompressed.
 11. **Concurrent exports of one page collide.** The blob key is
     `DOC_EXPORT_RENDERING/{pageId}/{docId}` — keyed by page and doc, **not** by
     request ID — so two in-flight exports of the same page contend for one object.

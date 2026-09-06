@@ -6,10 +6,11 @@
 (P3/P4 adapted to a canvas-page content write in place of a table-row write, since
 the scratch doc had no table at the time — see Results). P7 ran on 2026-09-04
 once the doc gained tables, then ran a second time on 2026-09-05 for the
-rich-text repeat the plan called for; P8 is still NOT RUN, though it is no
-longer blocked — the table with a writable column it needs now exists. See the
-Results section for raw output and findings, several of which contradict the
-plan's or the constants file's assumptions.
+rich-text repeat the plan called for. P3's outstanding control (the
+documented-unsatisfiable `sortBy=natural&visibleOnly=false` combination against
+the rows endpoint) and P8 both ran on 2026-09-06, against the same scratch doc.
+See the Results section for raw output and findings, several of which contradict
+the plan's or the constants file's assumptions.
 
 ## What this plan settles
 
@@ -590,9 +591,25 @@ attempt 10 -> 200
 
 All ten returned 200. **No staleness 400 fired as a consequence of our own write, on this scratch doc, within the ~10 s window tested.** This matches the plan's "all ten attempts return 200 → the header is effectively inert on this account and workload" outcome — with the caveat from P2 that we cannot conclude the header is inert in general, only that it never fired due to an actual pending mutation in this session.
 
-**Control case — not yet run.** The plan's control (`sortBy=natural&visibleOnly=false` against `$TABLE/rows`) needs a table; the scratch doc had none when P3 was executed here, but it has since gained two (see P7 and P8 below), so the control is now runnable. It has not yet been run. **Outstanding part: the specific documented-unsatisfiable-combination request, which only exists on the rows/listRows endpoint.**
+**Control case — run 2026-09-06.** The plan's control (`sortBy=natural&visibleOnly=false` against `$TABLE/rows`) needed a table; the scratch doc had none when P3 was executed on 2026-09-04, but it has since gained two (see P7 and P8 below), so the control became runnable. Run against `grid-PH5-RNMCB1`, both with and without `X-Coda-Doc-Version: latest`:
 
-**Adapted control performed instead**, using a genuinely invalid enum value against a real docs-domain endpoint (`listPageContent`'s `contentFormat`, whose spec declares exactly one legal value, `plainText`):
+```
+$ curl -s -H "$H" -H "X-Coda-Doc-Version: latest" \
+  "$BASE/docs/$DOC/tables/grid-PH5-RNMCB1/rows?sortBy=natural&visibleOnly=false"
+{"statusCode":400,"statusMessage":"Bad Request","message":"Natural sorting is only available for visible rows. When using sortBy=natural, pass visibleOnly=true or omit the visibleOnly param which has the same effect.(The natural ordering of a table is only meaningfully defined for visible rows.)"}
+HTTP 400, x-coda-server: api-doc, content-length: 298
+
+$ curl -s -H "$H" \
+  "$BASE/docs/$DOC/tables/grid-PH5-RNMCB1/rows?sortBy=natural&visibleOnly=false"
+(byte-identical body, byte-identical content-length: 298)
+HTTP 400, x-coda-server: api-doc
+```
+
+**Result: both requests returned 400 with a bare `{statusCode, statusMessage, message}` body — no `codaType` or `codaDetail` anywhere.** The with-header and without-header bodies were byte-identical, holding the negative control (a malformed request stays malformed regardless of the header). The message itself is highly specific rather than generic: it names the exact constraint violated (`sortBy=natural` requires `visibleOnly=true` or omitted) and even parenthetically explains why.
+
+Read next to the `listPageContent` result below, this narrows rather than confirms the earlier finding. `listPageContent`'s `bogusFormat` case carries a `codaType`/`codaDetail` discriminator despite the spec declaring no such schema for it; this rows-endpoint request, tested with the spec's own documented-unsatisfiable combination, carries no discriminator at all. So the discriminator's presence varies per operation and cannot be predicted from the spec in either direction: one endpoint having it says nothing about whether another does, and one endpoint lacking it says nothing about whether another will too. The message text itself — specific and human-readable rather than a generic "Bad Request" — is a different kind of signal from a structured field, and is the kind of thing the substring-matching client cited in `docs/reference/api-operational-constants.md` §2.1 depends on when no discriminator exists.
+
+**Adapted control performed on 2026-09-04**, using a genuinely invalid enum value against a real docs-domain endpoint (`listPageContent`'s `contentFormat`, whose spec declares exactly one legal value, `plainText`):
 
 ```
 $ curl -s -H "$H" -H "X-Coda-Doc-Version: latest" "$BASE/docs/$DOC/pages/$PAGE/content?contentFormat=bogusFormat"
@@ -784,7 +801,66 @@ every request was refused — and a read-back confirmed eleven rows and no stray
 
 ## P8 — Sync-token deletion reporting
 
-**NOT RUN, but no longer blocked.** It was originally skipped because the scratch doc had no table; the doc has since gained two, and a six-row `deleteRows` against `grid-PH5-RNMCB1` was executed successfully on 2026-09-04 during P7's cleanup, so the delete this probe needs is demonstrably available. It remains unrun because sync tokens were out of scope for that session, not because anything blocks it.
+**RUN 2026-09-06**, against `grid-EETnwpzofr` (`test-table-02`) and its `Name` column (`c-5HIv3OqGZ5`) — a different table from the one P3's control and P7 used.
+
+**Deviation from the plan as written.** Step 3 says to delete "one of the probe rows written by P3 or P7," expecting a leftover row to already be sitting in the table when this probe runs. By 2026-09-06 no such row remained — P7's cleanup (see above) deleted everything it had written and confirmed the table back to its original row count. So the script inserted its own disposable probe row before minting the sync token, and deleted that row in step 3 instead of a pre-existing one. This is recorded because the row IDs below are freshly created rather than leftovers from an earlier probe; it does not change the question P8 tests, which only needs *some* row present at token-mint time to later be deleted.
+
+**Step 0 (addition): insert the disposable probe row, then poll mutation status.**
+
+```
+$ curl -s -X POST ... "$BASE/docs/$DOC/tables/grid-EETnwpzofr/rows" ... value=p8-probe-1788666204
+{"requestId":"mutate:a917d8cd-5d3a-4bbf-b80d-86baabef8268","addedRowIds":["i-TrNg0d21dn"]}
+
+poll  1 (t= 2s) -> {"completed":false}
+poll  2 (t= 4s) -> {"completed":false}
+...
+poll  9 (t=18s) -> {"completed":false}
+poll 10 (t=20s) -> {"completed":true}
+```
+
+**Incidental timing measurement:** the insert took about 20 seconds to report `completed: true`, polled at 2-second intervals. Every intermediate poll returned bare `{"completed":false}` — no `warning` key present at all (contrast P4 above, where in-progress polls carried an explicit `"warning":null`).
+
+**Step 1: mint a sync token** (`GET rows?limit=5`, `nextSyncToken` extracted from the response).
+
+**Step 2: immediate replay against the fresh token.**
+
+```
+{"count": 0, "hasNextSync": true}
+```
+
+**Step 3: delete the probe row inserted in step 0** (`i-TrNg0d21dn`), then poll mutation status.
+
+```
+$ curl -s -X DELETE ... "$BASE/docs/$DOC/tables/grid-EETnwpzofr/rows/i-TrNg0d21dn"
+{"id":"i-TrNg0d21dn","requestId":"mutate:258bc10f-17ba-4316-bd1e-102f6ed1cffd"}
+
+poll 1 (t= 2s) -> {"completed":false}
+poll 2 (t= 4s) -> {"completed":false}
+poll 3 (t= 6s) -> {"completed":false}
+poll 4 (t= 8s) -> {"completed":false}
+poll 5 (t=10s) -> {"completed":true}
+```
+
+The delete took about 10 seconds to report `completed: true`, again polled at 2-second intervals with no `warning` key on any intermediate poll.
+
+**Step 4: wait 60 seconds for the snapshot to catch up, then read the delta against the same token.**
+
+```
+{"count": 0, "ids": []}
+```
+
+(The probe script additionally computed and printed a `"deletedRowMentioned": false` field — its own check for whether `i-TrNg0d21dn` appeared anywhere in `ids` — which is not itself part of the API response; the API's own fields are `count` and `ids`, both shown above.)
+
+**Result: the delta does not mention the deleted row.** `count: 0`, an empty `ids` array, and no reference anywhere in the response to the deleted row's ID or to the fact that a deletion occurred. This confirms live, for the first time, what `docs/reference/api-operational-constants.md` §2.4 had previously only inferred from the `Row` schema carrying no `deleted`/`tombstone` field: **a deletion is invisible to a sync delta.**
+
+**Step 5/6: is an invalid sync token distinguishable from any other 400?**
+
+```
+$ curl -s -H "$H" "$BASE/docs/$DOC/tables/grid-EETnwpzofr/rows?syncToken=NOT_A_TOKEN"
+{"statusCode":400,"statusMessage":"Bad Request","message":"Invalid pageToken."}
+```
+
+**Result: bare 400 shape, no `codaType`/`codaDetail`** — but unlike the generic `"Bad Request"` message the plan's own write-up anticipated as the undiagnosable case, the message here names the parameter (`"Invalid pageToken."`), the same kind of specific-but-unstructured signal seen in P3's control above.
 
 ## P9 — Synchronous page-content read
 
