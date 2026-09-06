@@ -9,6 +9,8 @@ name — it takes `pageContentLimit`, capped at `PAGE_CONTENT_LIST_LIMIT`,
 not `limit`.
 """
 
+from dataclasses import dataclass, field
+
 from superhumandoc_mcp.buckets import Operation, bucket_for
 from superhumandoc_mcp.client import DocsClient
 from superhumandoc_mcp.deadline import Deadline
@@ -21,6 +23,20 @@ PAGE_CONTENT_LIST_LIMIT = 500
 # beside it, so a smaller `limit` cannot take effect part-way through. This
 # is the floor that ladder walks down to before giving up.
 LIST_PAGE_SIZE_FLOOR = 25
+
+
+@dataclass(frozen=True)
+class Listing:
+    """Rows, and whether they are all of them.
+
+    A bare list cannot distinguish a listing that finished from one the
+    deadline cut short, and the two must not read alike: returning a short
+    result silently would present part of a table as the whole of it.
+    """
+
+    rows: list[dict] = field(default_factory=list)
+    complete: bool = True
+    stopped_because: str | None = None
 
 
 class DocsApi:
@@ -42,15 +58,23 @@ class DocsApi:
         size_param: str = "limit",
         page_size: int = LIST_PAGE_SIZE,
         params: dict[str, object] | None = None,
-    ) -> list[dict]:
+    ) -> Listing:
         """Follow `nextPageToken` until it is absent or `limit` is reached.
 
         `limit=None` means the caller has no cap of its own: paging runs to
         exhaustion rather than stopping after one page's worth.
+
+        If the deadline runs out after some rows are already in hand, they are
+        returned and marked incomplete rather than thrown away with the
+        exception. Discarding them would make saying how far it got mean
+        nothing. With nothing collected there is nothing to preserve, so the
+        request layer's own out-of-time refusal is left to propagate.
         """
         collected: list[dict] = []
         token: str | None = None
         while limit is None or len(collected) < limit:
+            if collected and deadline.expired:
+                return Listing(collected, False, "the tool call's deadline")
             query: dict[str, object] = dict(params or {})
             query[size_param] = (
                 page_size if limit is None else min(page_size, limit - len(collected))
@@ -71,33 +95,37 @@ class DocsApi:
             token = body.get("nextPageToken")
             if not token:
                 break
-        return collected if limit is None else collected[:limit]
+        return Listing(collected if limit is None else collected[:limit])
 
     async def list_pages(self, deadline: Deadline) -> list[dict]:
-        return await self._paged(
+        listing = await self._paged(
             f"/docs/{self._doc_id}/pages", Operation.LIST_PAGES, deadline
         )
+        return listing.rows
 
     async def list_tables(self, deadline: Deadline) -> list[dict]:
-        return await self._paged(
+        listing = await self._paged(
             f"/docs/{self._doc_id}/tables", Operation.LIST_TABLES, deadline
         )
+        return listing.rows
 
     async def list_columns(self, table: str, deadline: Deadline) -> list[dict]:
-        return await self._paged(
+        listing = await self._paged(
             f"/docs/{self._doc_id}/tables/{table}/columns",
             Operation.LIST_COLUMNS,
             deadline,
         )
+        return listing.rows
 
     async def list_page_content(self, page: str, deadline: Deadline) -> list[dict]:
-        return await self._paged(
+        listing = await self._paged(
             f"/docs/{self._doc_id}/pages/{page}/content",
             Operation.LIST_PAGE_CONTENT,
             deadline,
             size_param="pageContentLimit",
             page_size=PAGE_CONTENT_LIST_LIMIT,
         )
+        return listing.rows
 
     async def list_rows(
         self,
@@ -106,7 +134,7 @@ class DocsApi:
         *,
         limit: int,
         params: dict[str, object] | None = None,
-    ) -> list[dict]:
+    ) -> Listing:
         """Follow `nextPageToken` to `limit`, walking the 504 ladder (RFC 0011
         rule 9) if the API answers a page with a gateway timeout.
 
@@ -124,8 +152,13 @@ class DocsApi:
         fall *below* the floor is refused without trying. Only a 504
         ladders: any other refusal — including one raised mid-ladder, such
         as the deadline expiring before the next pass's first request — is
-        left to propagate immediately and unchanged, which is also what ends
-        the ladder when the deadline runs out before the floor does.
+        left to propagate immediately and unchanged.
+
+        A deadline that runs out mid-pass does not raise once rows are in
+        hand: the pass returns them marked incomplete, and the ladder stops
+        there. Rule 9 keeps the rows from the pass the deadline cut short,
+        because they were never distrusted by any response — only the passes
+        a 504 ended are discarded.
 
         No 504 has ever been observed against the real API from this
         client; this path ships tested only against a mock.

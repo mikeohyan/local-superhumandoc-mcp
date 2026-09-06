@@ -3,6 +3,7 @@ vocabulary and `api.py`, wrapped by `tool_boundary` and registered by
 `register_read_tools`.
 """
 
+from superhumandoc_mcp.api import Listing
 from superhumandoc_mcp.deadline import Deadline
 from superhumandoc_mcp.schema_cache import ColumnCache
 from superhumandoc_mcp.tools.reads import (
@@ -206,10 +207,14 @@ class _FakeRowApi:
         rows: dict[str, dict] | None = None,
         columns: list[dict] | None = None,
         listed: list[dict] | None = None,
+        complete: bool = True,
+        stopped_because: str | None = None,
     ) -> None:
         self._rows = rows or {}
         self._columns = columns or []
         self._listed = listed if listed is not None else list(self._rows.values())
+        self._complete = complete
+        self._stopped_because = stopped_because
         self.list_rows_calls: list[dict] = []
 
     async def get_row(self, table: str, row_id: str, deadline: Deadline) -> dict:
@@ -225,9 +230,9 @@ class _FakeRowApi:
         *,
         limit: int,
         params: dict | None = None,
-    ) -> list[dict]:
+    ) -> Listing:
         self.list_rows_calls.append({"limit": limit, "params": params})
-        return self._listed
+        return Listing(self._listed, self._complete, self._stopped_because)
 
 
 async def test_cells_come_back_keyed_by_column_name():
@@ -276,7 +281,7 @@ async def test_find_rows_returns_cells_keyed_by_name_and_the_row_id():
         listed=[{"id": "i-1", "values": {"c-euWseAF6J-": "Ada", "c-age456": 36}}],
     )
     cache = ColumnCache(api)
-    rows = await find_rows(api, cache, "grid-x")
+    rows = (await find_rows(api, cache, "grid-x"))["rows"]
     assert rows == [{"row_id": "i-1", "cells": {"Name": "Ada", "Age": 36}}]
 
 
@@ -293,7 +298,9 @@ async def test_client_side_filtering_is_applied_after_paging():
         ],
     )
     cache = ColumnCache(api)
-    rows = await find_rows(api, cache, "grid-x", filters={"Status": "open"}, limit=200)
+    rows = (await find_rows(
+        api, cache, "grid-x", filters={"Status": "open"}, limit=200
+    ))["rows"]
     assert len(rows) == 1
     assert all(r["cells"]["Status"] == "open" for r in rows)
 
@@ -303,3 +310,34 @@ async def test_find_rows_defaults_the_limit_to_two_hundred():
     cache = ColumnCache(api)
     await find_rows(api, cache, "grid-x")
     assert api.list_rows_calls[0]["limit"] == 200
+
+
+async def test_a_complete_listing_says_so_and_carries_no_note():
+    """The shape does not vary with the outcome. A caller that has to test for
+    a key's presence to learn whether it saw the whole table will eventually
+    forget to."""
+    api = _FakeRowApi(
+        columns=[_NAME_COLUMN],
+        listed=[{"id": "i-1", "values": {"c-euWseAF6J-": "Ada"}}],
+    )
+    result = await find_rows(api, ColumnCache(api), "grid-x")
+    assert result["complete"] is True
+    assert result["note"] is None
+
+
+async def test_a_listing_the_deadline_cut_short_keeps_its_rows_and_says_so():
+    """RFC 0011 rule 9: rows from the pass the deadline cut short are kept and
+    reported, and the tool says how far it got. find_rows pages up to the
+    caller's cap, so returning fewer than that silently would present part of
+    a table as the whole of it."""
+    api = _FakeRowApi(
+        columns=[_NAME_COLUMN],
+        listed=[{"id": "i-1", "values": {"c-euWseAF6J-": "Ada"}}],
+        complete=False,
+        stopped_because="the tool call's deadline",
+    )
+    result = await find_rows(api, ColumnCache(api), "grid-x", limit=200)
+    assert len(result["rows"]) == 1
+    assert result["complete"] is False
+    assert "deadline" in result["note"]
+    assert "not all of it" in result["note"]

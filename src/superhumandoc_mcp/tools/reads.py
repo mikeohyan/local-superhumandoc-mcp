@@ -161,7 +161,7 @@ async def find_rows(
     filters: dict[str, object] | None = None,
     sort: str | None = None,
     limit: int = 200,
-) -> list[dict]:
+) -> dict:
     """List a table's rows, up to `limit`, with cells keyed by column name and
     each row carrying its row ID — the same resolution `get_row` performs,
     applied to every row a listing pass returns.
@@ -176,6 +176,14 @@ async def find_rows(
     Ladders through `DocsApi.list_rows`'s 504 handling (RFC 0011 rule 9),
     which has shipped tested only against a mock: no 504 has ever been
     observed from this client against the real API.
+
+    Returns `{"rows", "complete", "note"}` rather than a bare list. The tool
+    pages up to the caller's cap, so a short result is ambiguous on its own —
+    it could be a small table or a listing the deadline cut short, and rule 9
+    requires the difference be said aloud rather than left to be inferred.
+    The shape does not vary with the outcome: a caller that has to test for
+    the presence of a key to learn whether it saw the whole table will
+    eventually forget to.
     """
     deadline = Deadline()
     columns = await cache.columns(table_id_or_name, deadline)
@@ -189,7 +197,7 @@ async def find_rows(
     if sort:
         params["sortBy"] = sort
 
-    rows = await api.list_rows(
+    listing = await api.list_rows(
         table_id_or_name, deadline, limit=limit, params=params or None
     )
     resolved = [
@@ -197,7 +205,7 @@ async def find_rows(
             "row_id": row.get("id"),
             "cells": _cells_by_name(row.get("values", {}), columns),
         }
-        for row in rows
+        for row in listing.rows
     ]
 
     if filters:
@@ -206,7 +214,16 @@ async def find_rows(
             for row in resolved
             if all(row["cells"].get(key) == value for key, value in filters.items())
         ]
-    return resolved
+
+    note = None
+    if not listing.complete:
+        note = (
+            f"Incomplete: stopped at {listing.stopped_because} after reading "
+            f"{len(listing.rows)} rows, short of the requested {limit}. This "
+            "is part of the table, not all of it. Ask for fewer rows, or "
+            "narrow the filter, to see the rest."
+        )
+    return {"rows": resolved, "complete": listing.complete, "note": note}
 
 
 def register_read_tools(server: MCPServer, api: DocsApi) -> None:

@@ -70,7 +70,7 @@ async def test_paging_follows_the_token_rather_than_the_requested_size():
         return httpx2.Response(200, json=pages[len(seen) - 1])
 
     api = _api(handler)
-    rows = await api.list_rows("grid-x", Deadline(), limit=200)
+    rows = (await api.list_rows("grid-x", Deadline(), limit=200)).rows
     assert [r["id"] for r in rows] == ["i-1", "i-2"]
     assert seen == [None, "t2"]
 
@@ -82,7 +82,7 @@ async def test_paging_stops_at_the_callers_cap_even_with_a_token_left():
         )
 
     api = _api(handler)
-    rows = await api.list_rows("grid-x", Deadline(), limit=25)
+    rows = (await api.list_rows("grid-x", Deadline(), limit=25)).rows
     assert len(rows) == 25
 
 
