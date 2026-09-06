@@ -134,7 +134,7 @@ are that policy's parameters.
 | `MAX_429_RETRIES_READ` | `3` | [DECIDED] | ≈26 s of waiting; set by the `upstream-api` topic |
 | `MAX_429_RETRIES_WRITE` | `4` | [DECIDED] | ≈80 s of waiting; set by the `upstream-api` topic |
 | `STICKY_429_THRESHOLD` | `3` consecutive 429s, `STICKY_429_WINDOW_S` `120.0` with zero successes | [DECIDED — thin evidence] | Sticky account-level 429s exist that backoff cannot clear — see §2.2. The threshold and window are set by the `failure-policy` topic, which supplied the trigger the `upstream-api` topic required and left unnumbered. Adopted from a staff report rather than measured, and tunable without superseding |
-| `TOOL_CALL_DEADLINE_S` | `90.0` | [DECIDED] | Hard ceiling regardless of retries remaining. An MCP tool call has a human waiting on it; set by the `upstream-api` topic |
+| `TOOL_CALL_DEADLINE_S` | `90.0` | [DECIDED] | Hard ceiling regardless of retries remaining. An MCP tool call has a human waiting on it. Constructed by the `failure-policy` topic, whose one-deadline-per-tool-call rule builds it and makes it the only authority, and which reserves a ten-second tail from it. This row previously named the `upstream-api` topic as its owner; that topic reuses the phrase "hard ceiling regardless of retries remaining" but states neither the constant's name nor the value 90, and defers the deadline itself |
 
 On the backoff base: staff's own recommendation is materially slower —
 Eric Koleda, <https://connect.superhuman.com/t/x/42678/3>: *"One popular strategy
@@ -154,13 +154,14 @@ encodes this explicitly, treating 429 as retryable even for non-idempotent verbs
 |---|---|---|---|
 | `MAX_REQUEST_BYTES` | `1_500_000` (1.5 MB) | [DECIDED] | Published cap is **2 MB**, staff-stated; the 25% headroom for encoding overhead is set by the `request-sizing` topic |
 | `ROW_INFLATION_FACTOR` | `2.2` | [DECIDED] | Owned by the `request-sizing` topic and, unusually for this table, **measured**: nine samples on 2026-09-05. Internal size ≈ the value's UTF-8 byte length with each newline counted **twice**, accurate to ~1% across every shape tested. The ratio is therefore bounded above by **2.0** — the all-newline limit — and 2.2 is a safe ceiling that is roughly double what any realistic row needs. See §2.3 |
-| `MAX_ROW_JSON_BYTES` | `38_000` (38 KB) | [DECIDED] | 38 KB × 2.2 ≈ 84 KB internal, under the published 85 KB row ceiling; set by the `request-sizing` topic. Conservative now that the internal size is computable — see §2.3 |
+| `MAX_ROW_JSON_BYTES` | `38_000` (38 KB) | [DECIDED] | 38 KB × 2.2 ≈ 84 KB internal, under the published 85 KB row ceiling; set by the `request-sizing` topic. Two facts now sit against that derivation, both from §2.3 and neither settled here. The multiplier 2.2 is above the ratio's provable maximum of 2.0, so the derivation reserves headroom for a case that cannot occur. And the internal size is directly computable from the value — `utf8_len` plus one extra byte per newline, accurate to ~1% over nine samples — so a client need not multiply wire bytes by anything to know it. Which quantity this cap is denominated in, and whether a computed internal size replaces the estimate, is an open decision for the owning topic |
 | `MAX_ROWS_PER_UPSERT` | `100` | [DECIDED] | **No published limit exists.** A user reports "several hundred rows" in one call working in production. One number, not the former soft/hard pair: the `request-sizing` topic splits an over-cap batch rather than refusing it, so there is nothing for a hard limit to refuse |
 | `MAX_ROW_IDS_PER_DELETE` | `500` | [DECIDED] | Row IDs are ~12 bytes, so the byte cap never binds; larger batches consume fewer doc-content-write tokens. Set by the `request-sizing` topic. The matching value in a third-party client is a coincidence, not a source — see the do-not-cite note in the cell-write findings |
 | `MAX_PAGE_CONTENT_BYTES` | `700_000` (700 KB) | [DECIDED] | 700 KB × 2.2 ≈ 1.5 MB internal. No published page-content limit exists. Set by the `request-sizing` topic, which refuses an over-cap page body rather than splitting it |
 | `LIST_PAGE_SIZE` | `200` requested | [DECIDED] | Named in the `request-sizing` topic's own table of operating values, as the page size to request and never to trust; `codaio` self-caps GET `limit` at 200, which is its evidence. The real max is deliberately undocumented and **silently clamped**, so the number requested is never the number to trust — see §2.3 |
 | `LIST_PAGE_SIZE_FLOOR` | `25` | [DECIDED — no evidence] | The floor of the page-size ladder the `request-sizing` topic runs on a 504. No 504 has ever been observed from this client, so both the ladder and its floor are reasoning from a staff answer to another user's problem |
-| `CHUNK_COST_ESTIMATE_S` | `30.0` | [DECIDED — thin evidence] | What the `request-sizing` topic charges against the tool-call deadline before starting another chunk. The only measurement is one single-row insert that reported `completed` at ~23 s (§1.3); 30 s adds margin over a sample of one |
+| `CHUNK_COST_ESTIMATE_S` | `30.0` | [DECIDED — thin evidence] | What the `request-sizing` topic charges against the tool-call deadline before starting another chunk. This row previously cited "a sample of one"; §1.3 now carries four observations, and they are two-sided. Inserts: ~20 s (probe P8, 2026-09-06) and a ~21.9–23.0 s figure whose source is not locatable. Deletes: ~10 s (P8) and a ~12 s figure from the same unlocatable run. Deletes therefore run at roughly half an insert's cost, and one constant covers both, so a delete-only batch is charged as though it were an insert. Whether the two operations get separate estimates is an open question for the owning topic |
+| `OVERVIEW_INLINE_COLUMNS_MAX_TABLES` | `8` | [DECIDED] | Recorded 2026-09-06. At or below eight tables, a document overview also returns every table's column schema; above it, columns are omitted and the caller is directed to fetch one table's schema on its own. The number is stated in the `tool-surface` topic's own body, which calls it a judgement rather than a measurement and a named constant to be tuned once real documents are observed — but it had no row here, so the one value that topic owns in this file was the one value not written down. It bounds cost: the call is one page list, one table list, and one column list per table, so leaving it unbounded spends a large share of the read budget on orientation. Note the weaker licence recorded in the legend: the `tool-surface` topic states the intent to tune without granting it outright |
 | `PAGE_CONTENT_LIST_LIMIT` | `500` | [SPEC-VERIFIED] | `listPageContent` uses a distinct `pageContentLimit` param with `maximum: 500`, `default: 50` |
 
 The two byte caps do not measure the same thing, which is the fact that makes them
@@ -179,13 +180,19 @@ This entry previously asserted the same thing without a citation; it now has one
 
 ## 1.3 Asynchronous mutation polling
 
-**Row writes are slower to complete than page-content writes** [observed
-2026-09-04, corroborated 2026-09-06]. A single-row `upsertRows` carrying a
-fifteen-character value reported `completed:false` on every poll until between
-t=21.9 s and t=23.0 s. A six-row `deleteRows` on the same table completed in about
-twelve seconds. A second run against the scratch doc, polling at 2-second
-intervals, saw the same shape: a row insert reported `completed: true` at about
-20 seconds and a row delete at about 10 seconds. Probe P4's 16–18 s figure was a
+**Row writes are slower to complete than page-content writes** [probe P8,
+2026-09-06]. Polling at 2-second intervals, a single-row insert reported
+`completed: true` at about 20 seconds and a single-row delete at about 10 seconds.
+This is the sourced measurement, and it is the one to reason from.
+
+An earlier pair of figures dated 2026-09-04 — a single-row `upsertRows` carrying a
+fifteen-character value completing between t=21.9 s and t=23.0 s, and a six-row
+`deleteRows` at about twelve seconds — is **recorded here without a locatable
+source** [flagged 2026-09-06]. No probe in `docs/validation/` contains those
+timings, that row shape, or that batch size: P4 is a page-content append rather
+than a row write, and P7 measured row size without recording completion times.
+The figures agree with P8 in shape and magnitude and so are kept, but anything
+load-bearing should cite P8 instead. Probe P4's 16–18 s figure was a
 page-content append, so the row path is the slower of the two, not a proxy for it
 — any budget reasoning that assumed otherwise is optimistic.
 Note also that the status body was `{"completed":false}` with **no `warning` key at
@@ -200,7 +207,8 @@ now observed across two independent runs rather than one.
 |---|---|---|---|
 | `MUTATION_INITIAL_SLEEP_S` | `3.0` | [DECIDED — no evidence] | Staff confirm the *need* for a first-poll delay — "add a short sleep, **maybe a few seconds**, before the first time you call that endpoint" (see §2.1) — but nothing sources the specific 3.0 s. Owned by the `async-operations` topic, which fixes that the delay exists and leaves the number tunable |
 | `MUTATION_POLL_INTERVAL_S` | `2.0` | [DECIDED — no evidence] | Status reads are the cheapest bucket. Owned by the `async-operations` topic |
-| `MUTATION_404_GRACE_S` | `15.0` | [DECIDED — no evidence] | A 404 before this is replication lag, not a missing mutation. **Probe P4, 2026-09-04**: two independent write→poll sequences on a near-empty scratch doc never produced a 404, including at t=0 immediately after the write — the endpoint consistently returned 200 with `completed:false` instead. `completed` flipped to `true` between t=16s and t=18s. The 404-replication race did not reproduce on this doc; the observed bottleneck was completion latency (~18s), not a 404 window. Owned by the `async-operations` topic, which sets which way this window's error falls — see the note after §1.4 |
+| `MUTATION_POLL_BACKOFF` | ×1.5, capped at `MUTATION_POLL_MAX_INTERVAL_S = 15.0` | [DECIDED — no evidence] | Added 2026-09-06. The `async-operations` topic states that the two poll loops share one shape and differ in their numbers, but only the export half of that shape had been written down: the mutation half named an interval and no schedule for it to follow, so the loop could not be built from the tables alone. Mirrored from the export row, which is the same topic's own expression of the shared shape. Nothing measured supports ×1.5 or 15.0 on the mutation path specifically |
+| `MUTATION_404_GRACE_S` | `30.0` | [DECIDED — no evidence] | A 404 before this is replication lag, not a missing mutation. Raised from `15.0` on 2026-09-06: row writes are not observed to complete until ~20–23 s (see the note opening this section), so a 15 s window declared a 404 terminal *before the write it was watching was ever expected to finish*, which falls the opposite way from the owning topic's own instruction that these windows be set generously because the error they guard against is misreporting a write that succeeded. 30 s clears the observed completion time and stays well inside `MUTATION_DEADLINE_S`. **Probe P4, 2026-09-04**: two independent write→poll sequences on a near-empty scratch doc never produced a 404, including at t=0 immediately after the write — the endpoint consistently returned 200 with `completed:false` instead. `completed` flipped to `true` between t=16s and t=18s. The 404-replication race did not reproduce on this doc; the observed bottleneck was completion latency (~18s), not a 404 window. Owned by the `async-operations` topic, which sets which way this window's error falls — see the note after §1.4 |
 | `MUTATION_DEADLINE_S` | `60.0` | [DECIDED — no evidence] | Then return "queued, not confirmed" — never an error, since the API offers no failure state for a mutation. Staff describe the underlying delay as "30 seconds to a few minutes" and architectural. Owned by the `async-operations` topic |
 
 The endpoint is at the **root**: `GET /mutationStatus/{requestId}`, *not*
@@ -216,7 +224,7 @@ for more than one day after the mutation was completed"* [SPEC-VERIFIED].
 | `EXPORT_INITIAL_SLEEP_S` | `2.0` | [DECIDED — no evidence] | Staff confirm the *need* — *"Simply wait a second and retry"* (see §2.5) — but nothing sources the specific 2.0 s. Owned by the `async-operations` topic, on the same footing as its mutation counterpart |
 | `EXPORT_POLL_INTERVAL_S` | `2.0` | [DECIDED — no evidence] | Owned by the `async-operations` topic. Status GET is read-bucket; at 2 s this uses ~1.5% of it. Matches the two best-behaved clients |
 | `EXPORT_POLL_BACKOFF` | ×1.5, capped at `EXPORT_POLL_MAX_INTERVAL_S = 15.0` | [DECIDED — no evidence] | The schedule the poll interval follows; owned by the `async-operations` topic, which decides the loop shape rather than only its interval. `ofloveandhate/codaio` uses 1 s × 1.5 → 15 s |
-| `EXPORT_DEADLINE_S` | `90.0` | [DECIDED — no evidence] | Owned by the `async-operations` topic. No source quantifies export duration. `codaio` allows 300 s; 90 s fits a synchronous tool call |
+| `EXPORT_DEADLINE_S` | `90.0` | [DECIDED — no evidence] | Owned by the `async-operations` topic. No source quantifies export duration. `codaio` allows 300 s; 90 s fits a synchronous tool call. **Inert as written** [noted 2026-09-06]: it equals `TOOL_CALL_DEADLINE_S` while the `failure-policy` topic makes that the only authority and reserves a ten-second tail from it, leaving an eighty-second working budget. A subordinate ceiling equal to the outer total can never be the one that fires — the outer deadline always cuts the loop first. Whether it is retired or given a value below the working budget is an open question for its owning topic; this row records only that at 90.0 it has no effect |
 | `EXPORT_404_GRACE_S` | `20.0` | [DECIDED — no evidence] | A 404 within this window is replication lag. Probe P5 was to calibrate it and never produced a 404. Owned by the `async-operations` topic — see the note after §1.4 on why this window carries more weight than its marker suggests |
 | `EXPORT_LINK_TTL_S` | `300` (5 min) | **[STAFF], confirmed [SPEC-VERIFIED] 2026-09-04** | *"the downloadLink returned by the API expires after only a few minutes"*; the sibling Admin API endpoint publishes exactly 5 minutes. **Directly observed by probe P5b**: link served content at t=300s, failed by t=330s; the signed URL's own `X-Amz-Expires=300` query parameter corroborates this independent of staff prose — see §2.5 |
 | `EXPORT_FILE_TTL` | ~a few days | [STAFF] | *"the exported file remains live for a few days"* — the file outlives the link, which is why re-polling mints a fresh URL |
@@ -848,6 +856,19 @@ a file and `file(1)` identified it as "gzip compressed data". A gzip body is
 therefore a third possible shape behind the link, alongside the valid content it
 appears to be and the XML error document above — which of the three a given
 response is stays unresolved until it is decompressed.
+
+**What separates the three on the wire** [assembled 2026-09-06 from the shapes
+above; no new probe]. The status code does not: the `NoSuchKey` document was
+reported under a `200` and the `AccessDenied` document was measured under a `403`,
+so a `200` alone distinguishes nothing. The decisive bytes are the body's own
+prefix. Gzip content begins `1f 8b`; both error documents begin `<?xml` and carry
+a `<Code>` element naming which failure it is. Note that these two facts are not
+visible at the same time through an ordinary HTTP client: `httpx2` selects a
+decoder from `Content-Encoding` automatically for `.content`, `.text` and
+`.json()`, so by the time a body is read the gzip framing is gone and what remains
+is either the exported markdown or the XML error document. Only `iter_raw` /
+`aiter_raw` yield the undecoded bytes. What a client should check, and at which of
+those two layers, is a decision this file does not make.
 
 **The download host is not the API host** [SPEC-VERIFIED by live probe].
 `https://docs.superhuman.com/blobs/DOC_EXPORT_RENDERING/…` is served by the web app,
