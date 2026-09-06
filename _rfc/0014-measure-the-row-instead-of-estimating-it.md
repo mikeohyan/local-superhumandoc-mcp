@@ -1,9 +1,9 @@
 ---
 rfc: 0014
 title: Measure a row in the units the API counts, and report what a deadline left undone
-status: Proposed
+status: Accepted
 created: 2026-09-06
-decided:
+decided: 2026-09-06
 supersedes: 0011
 superseded_by:
 topic: request-sizing

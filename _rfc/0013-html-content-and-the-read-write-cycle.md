@@ -1,9 +1,9 @@
 ---
 rfc: 0013
 title: Write page content as HTML, and never send a read back as a write
-status: Proposed
+status: Accepted
 created: 2026-09-06
-decided:
+decided: 2026-09-06
 supersedes: 0005
 superseded_by:
 topic: tool-surface
