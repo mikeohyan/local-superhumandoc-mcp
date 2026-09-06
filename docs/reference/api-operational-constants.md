@@ -36,11 +36,14 @@ Corrections belong in place. This file is mutable.
 owns it. Four topics say in terms that their numbers may move against observation
 without a new RFC — `upstream-api`, `request-sizing`, `failure-policy` and
 `async-operations` — because what those decisions fix is the rule and not the
-calibration. The `tool-surface` topic also owns a value here, but with weaker
-language: it says its constants are "named constants so they can be tuned once
-real documents are observed", which states the intent without granting the
-licence outright. Where a
-decision does *not* say either, the value changes only by superseding it — an
+calibration. The `tool-surface` topic also owns one value here and **does not**
+grant that licence. Its previous decision came close, calling its constants
+"named constants so they can be tuned once real documents are observed"; the
+decision that superseded it on 2026-09-06 states the threshold and says nothing
+about tuning it, so `OVERVIEW_INLINE_COLUMNS_MAX_TABLES` now changes only by
+superseding that RFC. That is a narrowing nobody argued for — it fell out of
+the drafting — and it is recorded here rather than quietly worked around. Where
+a decision does *not* say either, the value changes only by superseding it — an
 accepted RFC body is never amended in place. Either way the edit belongs to whoever
 owns the topic, and the justification column is where to look before touching a
 number.
@@ -153,24 +156,25 @@ encodes this explicitly, treating 429 as retryable even for non-idempotent verbs
 | Constant | Value | Marker | Justification |
 |---|---|---|---|
 | `MAX_REQUEST_BYTES` | `1_500_000` (1.5 MB) | [DECIDED] | Published cap is **2 MB**, staff-stated; the 25% headroom for encoding overhead is set by the `request-sizing` topic |
-| `ROW_INFLATION_FACTOR` | `2.2` | [DECIDED] | Owned by the `request-sizing` topic and, unusually for this table, **measured**: nine samples on 2026-09-05. Internal size ≈ the value's UTF-8 byte length with each newline counted **twice**, accurate to ~1% across every shape tested. The ratio is therefore bounded above by **2.0** — the all-newline limit — and 2.2 is a safe ceiling that is roughly double what any realistic row needs. See §2.3 |
-| `MAX_ROW_JSON_BYTES` | `38_000` (38 KB) | [DECIDED] | 38 KB × 2.2 ≈ 84 KB internal, under the published 85 KB row ceiling; set by the `request-sizing` topic. Two facts now sit against that derivation, both from §2.3 and neither settled here. The multiplier 2.2 is above the ratio's provable maximum of 2.0, so the derivation reserves headroom for a case that cannot occur. And the internal size is directly computable from the value — `utf8_len` plus one extra byte per newline, accurate to ~1% over nine samples — so a client need not multiply wire bytes by anything to know it. Which quantity this cap is denominated in, and whether a computed internal size replaces the estimate, is an open decision for the owning topic |
+| `MAX_ROW_INTERNAL_BYTES` | `84_000` | [DECIDED] | Replaced `MAX_ROW_JSON_BYTES` on 2026-09-06, when the `request-sizing` topic moved the cap into the units the API actually counts. Denominated in **internal** bytes — `utf8_len(value)` plus one extra byte per newline, summed over the row's values, per §2.3 — and computed rather than estimated, so nothing is multiplied by anything. `ROW_INFLATION_FACTOR` was retired by the same decision and no longer appears in this table. The margin below the published 85 KB ceiling covers the formula's error, worst observed 1.1% over nine samples, rather than a guessed unit conversion; it is deliberately generous because the vendor's "85 KB" does not say whether it means 85,000 or 87,040, and 84,000 sits under either reading |
 | `MAX_ROWS_PER_UPSERT` | `100` | [DECIDED] | **No published limit exists.** A user reports "several hundred rows" in one call working in production. One number, not the former soft/hard pair: the `request-sizing` topic splits an over-cap batch rather than refusing it, so there is nothing for a hard limit to refuse |
 | `MAX_ROW_IDS_PER_DELETE` | `500` | [DECIDED] | Row IDs are ~12 bytes, so the byte cap never binds; larger batches consume fewer doc-content-write tokens. Set by the `request-sizing` topic. The matching value in a third-party client is a coincidence, not a source — see the do-not-cite note in the cell-write findings |
 | `MAX_PAGE_CONTENT_BYTES` | `700_000` (700 KB) | [DECIDED] | 700 KB × 2.2 ≈ 1.5 MB internal. No published page-content limit exists. Set by the `request-sizing` topic, which refuses an over-cap page body rather than splitting it |
 | `LIST_PAGE_SIZE` | `200` requested | [DECIDED] | Named in the `request-sizing` topic's own table of operating values, as the page size to request and never to trust; `codaio` self-caps GET `limit` at 200, which is its evidence. The real max is deliberately undocumented and **silently clamped**, so the number requested is never the number to trust — see §2.3 |
 | `LIST_PAGE_SIZE_FLOOR` | `25` | [DECIDED — no evidence] | The floor of the page-size ladder the `request-sizing` topic runs on a 504. No 504 has ever been observed from this client, so both the ladder and its floor are reasoning from a staff answer to another user's problem |
 | `CHUNK_COST_ESTIMATE_S` | `30.0` | [DECIDED — thin evidence] | What the `request-sizing` topic charges against the tool-call deadline before starting another chunk. This row previously cited "a sample of one"; §1.3 now carries four observations, and they are two-sided. Inserts: ~20 s (probe P8, 2026-09-06) and a ~21.9–23.0 s figure whose source is not locatable. Deletes: ~10 s (P8) and a ~12 s figure from the same unlocatable run. Deletes therefore run at roughly half an insert's cost, and one constant covers both, so a delete-only batch is charged as though it were an insert. Whether the two operations get separate estimates is an open question for the owning topic |
-| `OVERVIEW_INLINE_COLUMNS_MAX_TABLES` | `8` | [DECIDED] | Recorded 2026-09-06. At or below eight tables, a document overview also returns every table's column schema; above it, columns are omitted and the caller is directed to fetch one table's schema on its own. The number is stated in the `tool-surface` topic's own body, which calls it a judgement rather than a measurement and a named constant to be tuned once real documents are observed — but it had no row here, so the one value that topic owns in this file was the one value not written down. It bounds cost: the call is one page list, one table list, and one column list per table, so leaving it unbounded spends a large share of the read budget on orientation. Note the weaker licence recorded in the legend: the `tool-surface` topic states the intent to tune without granting it outright |
+| `OVERVIEW_INLINE_COLUMNS_MAX_TABLES` | `8` | [DECIDED] | Recorded 2026-09-06. At or below eight tables, a document overview also returns every table's column schema; above it, columns are omitted and the caller is directed to fetch one table's schema on its own. The number is stated in the `tool-surface` topic's own body. It bounds cost: the call is one page list, one table list, and one column list per table, so leaving it unbounded spends a large share of the read budget on orientation. **This value cannot be retuned by editing this file** — see the legend. The decision accepted on 2026-09-06 states the threshold without delegating it, so unlike every other `[DECIDED]` row here it moves only by superseding |
 | `PAGE_CONTENT_LIST_LIMIT` | `500` | [SPEC-VERIFIED] | `listPageContent` uses a distinct `pageContentLimit` param with `maximum: 500`, `default: 50` |
 
 The two byte caps do not measure the same thing, which is the fact that makes them
 easy to misuse. `MAX_REQUEST_BYTES` is about the request, so it is a count of the
-bytes actually put on the wire. `MAX_ROW_JSON_BYTES` is about the row, and §2.3
-shows the server counts a row as its values' UTF-8 length with newlines charged
-twice — a quantity that can be six times smaller than the same row's escaped JSON.
-100 rows at 38 KB would be 3.8 MB, so on either measure the byte axis binds for
-large rows and the count axis for small ones. What a client does with these — split
+bytes actually put on the wire. `MAX_ROW_INTERNAL_BYTES` is about the row, and
+§2.3 shows the server counts a row as its values' UTF-8 length with newlines
+charged twice — a quantity that can be six times smaller than the same row's
+escaped JSON. The two are not comparable and never were; the `request-sizing`
+topic now computes the second directly rather than estimating it from the
+first. On either measure the byte axis binds for large rows and the count axis
+for small ones. What a client does with these — split
 or refuse, and which measure applies where — is set by the `request-sizing` topic.
 
 **A batch refusal does not identify the offending row** [measured 2026-09-04]. An
@@ -532,8 +536,10 @@ each newline charged twice, reported in units of 1024 bytes:
 
 Three consequences follow, and all three matter to a client.
 
-**The maximum ratio is 2.0, at all-newline content.** Nothing can exceed it, which
-retires the question of how conservative `ROW_INFLATION_FACTOR` needs to be. It
+**The maximum ratio is 2.0, at all-newline content.** Nothing can exceed it. This
+is what retired the inflation factor outright: a client that can compute the
+internal size has no use for a ratio, and the value in use was 2.2, above a
+maximum that cannot occur. It
 also explains the 2023 forum report exactly — a 44 KB body counted as 87 KB is
 newline-dense content sitting at that limit, which is what a markdown list or a
 pasted document looks like.
@@ -970,8 +976,14 @@ Facts, in the order a caller meets them.
    page's `contentType` is readable in advance, so the refusal is predictable
    rather than something that must be discovered by trying.
 2. **The two formats carry different content.** `markdown` drops page-level
-   attachments; `html` retains them [STAFF, §2.5]. Nothing else distinguishes them
-   for this purpose, so attachments are the only axis on which the choice matters.
+   attachments; `html` retains them [STAFF, §2.5]. That is the only axis known to
+   distinguish them **on export**, which is what this list is about. The **write**
+   direction is a different question and has a second axis: a table written as a
+   markdown pipe table loses its header row, where the same table written as HTML
+   keeps it [B3 and B4, measured 2026-09-06, recorded in
+   `docs/validation/2026-09-03-markdown-fidelity-tests.md`]. This entry previously said attachments
+   were the only axis on which the choice matters, without distinguishing the two
+   directions.
 3. **`POST /docs/{docId}/pages/{pageIdOrName}/export` returns 202** with `id` and
    `href`. Which rate-limit bucket it draws on is **not established** — probe P6
    ruled out the doc-content rates without identifying what does apply (§1.4,
