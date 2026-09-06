@@ -24,17 +24,29 @@ def _config(allow_destructive: bool = False) -> Config:
     )
 
 
-async def test_lists_the_always_on_read_tools() -> None:
+async def test_lists_exactly_the_always_on_read_tools() -> None:
+    """Deliberately an exact set rather than a subset. This is the whole tool
+    surface a model sees, so it should fail when a tool appears by accident
+    as loudly as when an intended one goes missing. Widen it when a task
+    registers a tool, never to make it pass."""
     server = build_server(_config())
     async with Client(server) as client:
         result = await client.list_tools()
-        assert {tool.name for tool in result.tools} == {"outline_page"}
+        assert {tool.name for tool in result.tools} == {
+            "outline_page",
+            "describe_table",
+            "get_doc_overview",
+        }
 
 
-async def test_still_lists_the_read_tools_with_config() -> None:
+async def test_every_registered_tool_describes_itself() -> None:
+    """The decided surface requires specific things of these descriptions —
+    that a read is a projection, that filtering is one column and exact-value
+    only. None of that can be true of a tool with no description at all, and
+    a model choosing between tools sees nothing else."""
     async with Client(build_server(_config())) as client:
-        names = {tool.name for tool in (await client.list_tools()).tools}
-        assert "outline_page" in names
+        for tool in (await client.list_tools()).tools:
+            assert tool.description, f"{tool.name} has no description"
 
 
 async def test_the_destructive_gate_adds_no_tools_in_this_wave() -> None:
