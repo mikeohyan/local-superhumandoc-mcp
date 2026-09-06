@@ -8,7 +8,9 @@ from superhumandoc_mcp.schema_cache import ColumnCache
 from superhumandoc_mcp.tools.reads import (
     OVERVIEW_INLINE_COLUMNS_MAX_TABLES,
     describe_table,
+    find_rows,
     get_doc_overview,
+    get_row,
     outline_page,
 )
 
@@ -186,3 +188,118 @@ async def test_get_doc_overview_returns_the_page_tree():
     cache = ColumnCache(api)
     overview = await get_doc_overview(api, cache)
     assert overview["pages"] == pages
+
+
+_NAME_COLUMN = {"id": "c-euWseAF6J-", "name": "Name"}
+_AGE_COLUMN = {"id": "c-age456", "name": "Age"}
+_STATUS_COLUMN = {"id": "c-status1", "name": "Status"}
+
+
+class _FakeRowApi:
+    """Stands in for `DocsApi` for `get_row` and `find_rows`: returns fixed
+    rows and columns without any HTTP, and records what `list_rows` was
+    called with so a test can pin what a listing pass asked for."""
+
+    def __init__(
+        self,
+        *,
+        rows: dict[str, dict] | None = None,
+        columns: list[dict] | None = None,
+        listed: list[dict] | None = None,
+    ) -> None:
+        self._rows = rows or {}
+        self._columns = columns or []
+        self._listed = listed if listed is not None else list(self._rows.values())
+        self.list_rows_calls: list[dict] = []
+
+    async def get_row(self, table: str, row_id: str, deadline: Deadline) -> dict:
+        return self._rows[row_id]
+
+    async def list_columns(self, table: str, deadline: Deadline) -> list[dict]:
+        return self._columns
+
+    async def list_rows(
+        self,
+        table: str,
+        deadline: Deadline,
+        *,
+        limit: int,
+        params: dict | None = None,
+    ) -> list[dict]:
+        self.list_rows_calls.append({"limit": limit, "params": params})
+        return self._listed
+
+
+async def test_cells_come_back_keyed_by_column_name():
+    """The row endpoint keys `values` by column ID (real keys look like
+    `c-euWseAF6J-`, docs/reference/api-operational-constants.md §6), which is
+    not a key a model would recognise. get_row resolves it through the shared
+    ColumnCache."""
+    api = _FakeRowApi(
+        rows={
+            "i-1": {
+                "id": "i-1",
+                "values": {"c-euWseAF6J-": "Ada", "c-age456": 36},
+            }
+        },
+        columns=[_NAME_COLUMN, _AGE_COLUMN],
+    )
+    cache = ColumnCache(api)
+    row = await get_row(api, cache, "grid-x", "i-1")
+    assert row["cells"] == {"Name": "Ada", "Age": 36}
+
+
+async def test_the_row_id_is_always_returned_with_the_row():
+    """Every later write addresses a row by this value."""
+    api = _FakeRowApi(rows={"i-1": {"id": "i-1", "values": {}}}, columns=[])
+    cache = ColumnCache(api)
+    row = await get_row(api, cache, "grid-x", "i-1")
+    assert row["row_id"] == "i-1"
+
+
+async def test_a_column_id_the_schema_does_not_know_is_surfaced_not_dropped():
+    """The schema may be stale or simply not carry an entry for some ID.
+    Losing a cell silently is worse than surfacing it under a key a model
+    does not recognise."""
+    api = _FakeRowApi(
+        rows={"i-1": {"id": "i-1", "values": {"c-unknown999": "mystery"}}},
+        columns=[_NAME_COLUMN],
+    )
+    cache = ColumnCache(api)
+    row = await get_row(api, cache, "grid-x", "i-1")
+    assert row["cells"] == {"c-unknown999": "mystery"}
+
+
+async def test_find_rows_returns_cells_keyed_by_name_and_the_row_id():
+    api = _FakeRowApi(
+        columns=[_NAME_COLUMN, _AGE_COLUMN],
+        listed=[{"id": "i-1", "values": {"c-euWseAF6J-": "Ada", "c-age456": 36}}],
+    )
+    cache = ColumnCache(api)
+    rows = await find_rows(api, cache, "grid-x")
+    assert rows == [{"row_id": "i-1", "cells": {"Name": "Ada", "Age": 36}}]
+
+
+async def test_client_side_filtering_is_applied_after_paging():
+    """Server-side filtering is one column and exact-value only; every
+    filter — including the one condition offered to the server — is still
+    checked here, so correctness never depends on the server having applied
+    it."""
+    api = _FakeRowApi(
+        columns=[_NAME_COLUMN, _STATUS_COLUMN],
+        listed=[
+            {"id": "i-1", "values": {"c-status1": "open"}},
+            {"id": "i-2", "values": {"c-status1": "closed"}},
+        ],
+    )
+    cache = ColumnCache(api)
+    rows = await find_rows(api, cache, "grid-x", filters={"Status": "open"}, limit=200)
+    assert len(rows) == 1
+    assert all(r["cells"]["Status"] == "open" for r in rows)
+
+
+async def test_find_rows_defaults_the_limit_to_two_hundred():
+    api = _FakeRowApi(columns=[], listed=[])
+    cache = ColumnCache(api)
+    await find_rows(api, cache, "grid-x")
+    assert api.list_rows_calls[0]["limit"] == 200

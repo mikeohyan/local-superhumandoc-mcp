@@ -12,10 +12,15 @@ not `limit`.
 from superhumandoc_mcp.buckets import Operation, bucket_for
 from superhumandoc_mcp.client import DocsClient
 from superhumandoc_mcp.deadline import Deadline
-from superhumandoc_mcp.errors import Replay
+from superhumandoc_mcp.errors import Replay, UpstreamRefused
 
 LIST_PAGE_SIZE = 200
 PAGE_CONTENT_LIST_LIMIT = 500
+# RFC 0011 rule 9. A 504 on a listing restarts the whole pass at half the
+# page size rather than resuming: a pageToken ignores every parameter sent
+# beside it, so a smaller `limit` cannot take effect part-way through. This
+# is the floor that ladder walks down to before giving up.
+LIST_PAGE_SIZE_FLOOR = 25
 
 
 class DocsApi:
@@ -102,13 +107,55 @@ class DocsApi:
         limit: int,
         params: dict[str, object] | None = None,
     ) -> list[dict]:
-        return await self._paged(
-            f"/docs/{self._doc_id}/tables/{table}/rows",
-            Operation.LIST_ROWS,
-            deadline,
-            limit=limit,
-            params=params,
-        )
+        """Follow `nextPageToken` to `limit`, walking the 504 ladder (RFC 0011
+        rule 9) if the API answers a page with a gateway timeout.
+
+        Scoped to this method alone, not to paging in general: the 504
+        evidence rule 9 is built on is specific to row listing, whose natural
+        page size differs from `listPages`/`listTables`/`listColumns`, and
+        RFC 0011 is explicit that inventing a ladder for those from one
+        endpoint's evidence would be extrapolation the RFC means to rule out.
+
+        A 504 halves the page size and restarts the whole pass from no
+        token, discarding whatever the failed pass had collected — a
+        `pageToken` ignores every other parameter sent beside it, so a
+        smaller size cannot take effect part-way through. The floor size is
+        attempted once before the ladder gives up; only a size that would
+        fall *below* the floor is refused without trying. Only a 504
+        ladders: any other refusal — including one raised mid-ladder, such
+        as the deadline expiring before the next pass's first request — is
+        left to propagate immediately and unchanged, which is also what ends
+        the ladder when the deadline runs out before the floor does.
+
+        No 504 has ever been observed against the real API from this
+        client; this path ships tested only against a mock.
+        """
+        path = f"/docs/{self._doc_id}/tables/{table}/rows"
+        page_size = LIST_PAGE_SIZE
+        while True:
+            try:
+                return await self._paged(
+                    path,
+                    Operation.LIST_ROWS,
+                    deadline,
+                    limit=limit,
+                    page_size=page_size,
+                    params=params,
+                )
+            except UpstreamRefused as refusal:
+                if refusal.status != 504:
+                    raise
+                page_size //= 2
+                if page_size < LIST_PAGE_SIZE_FLOOR:
+                    raise UpstreamRefused(
+                        Operation.LIST_ROWS.value,
+                        504,
+                        "Repeated gateway timeouts persisted down to the "
+                        f"page-size floor of {LIST_PAGE_SIZE_FLOOR}. This "
+                        "usually means the document itself is too large to "
+                        "list in a single pass, not that the request was "
+                        "malformed.",
+                    ) from refusal
 
     async def get_row(self, table: str, row_id: str, deadline: Deadline) -> dict:
         response = await self._client.request(

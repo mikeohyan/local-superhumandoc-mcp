@@ -40,6 +40,20 @@ _GET_DOC_OVERVIEW_DESCRIPTION = (
     "caller to describe_table for any table it needs the schema of."
 )
 
+_GET_ROW_DESCRIPTION = (
+    "Return one row by its ID, with its cells keyed by column name. Rows are "
+    "addressed by ID, never by name: the API accepts a name but affects an "
+    "arbitrary row on collision. The returned row always carries `row_id`, "
+    "because every write addresses a row by that value."
+)
+
+_FIND_ROWS_DESCRIPTION = (
+    "List a table's rows, up to `limit`, with cells keyed by column name and "
+    "each row carrying its row ID. Server-side filtering supports at most "
+    "one column, exact-value match only; every other condition is applied "
+    "client-side after paging."
+)
+
 
 async def outline_page(api: DocsApi, page_id_or_name: str) -> list[dict]:
     """Return the page's lines as an ordered list of `{element_id, style,
@@ -103,6 +117,98 @@ async def get_doc_overview(api: DocsApi, cache: ColumnCache) -> dict:
     }
 
 
+def _cells_by_name(values: dict, columns: list[dict]) -> dict:
+    """Resolve a row's `values` (keyed by column ID — real keys look like
+    `c-euWseAF6J-`, docs/reference/api-operational-constants.md §6) against a
+    table's column schema.
+
+    A column ID that the schema does not know about — a stale cache entry, or
+    a column the schema listing simply omitted — is not dropped: the cell is
+    kept under its raw ID rather than silently losing data.
+    """
+    name_by_id = {column["id"]: column["name"] for column in columns}
+    return {
+        name_by_id.get(column_id, column_id): value
+        for column_id, value in values.items()
+    }
+
+
+async def get_row(
+    api: DocsApi, cache: ColumnCache, table_id_or_name: str, row_id: str
+) -> dict:
+    """Return one row with its cells keyed by column name, resolved through
+    the shared `ColumnCache`.
+
+    The row always carries `row_id`: rows are addressed by ID, never by
+    name — the API accepts a name but affects an arbitrary row on
+    collision — and every later write needs this value to name the row it
+    changes.
+    """
+    deadline = Deadline()
+    row = await api.get_row(table_id_or_name, row_id, deadline)
+    columns = await cache.columns(table_id_or_name, deadline)
+    return {
+        "row_id": row.get("id", row_id),
+        "cells": _cells_by_name(row.get("values", {}), columns),
+    }
+
+
+async def find_rows(
+    api: DocsApi,
+    cache: ColumnCache,
+    table_id_or_name: str,
+    *,
+    filters: dict[str, object] | None = None,
+    sort: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """List a table's rows, up to `limit`, with cells keyed by column name and
+    each row carrying its row ID — the same resolution `get_row` performs,
+    applied to every row a listing pass returns.
+
+    Server-side filtering supports exactly one column, exact-value match
+    only. When `filters` is given, only its first entry is offered to the API
+    as a query condition; every entry in `filters` — including that first
+    one — is still checked here after paging, so correctness never depends
+    on whether the server actually applied it. `sort`, if given, is passed
+    through to the API unchanged.
+
+    Ladders through `DocsApi.list_rows`'s 504 handling (RFC 0011 rule 9),
+    which has shipped tested only against a mock: no 504 has ever been
+    observed from this client against the real API.
+    """
+    deadline = Deadline()
+    columns = await cache.columns(table_id_or_name, deadline)
+    id_by_name = {column["name"]: column["id"] for column in columns}
+
+    params: dict[str, object] = {}
+    if filters:
+        column, value = next(iter(filters.items()))
+        column_id = id_by_name.get(column, column)
+        params["query"] = f'{column_id}:"{value}"'
+    if sort:
+        params["sortBy"] = sort
+
+    rows = await api.list_rows(
+        table_id_or_name, deadline, limit=limit, params=params or None
+    )
+    resolved = [
+        {
+            "row_id": row.get("id"),
+            "cells": _cells_by_name(row.get("values", {}), columns),
+        }
+        for row in rows
+    ]
+
+    if filters:
+        resolved = [
+            row
+            for row in resolved
+            if all(row["cells"].get(key) == value for key, value in filters.items())
+        ]
+    return resolved
+
+
 def register_read_tools(server: MCPServer, api: DocsApi) -> None:
     """Register the always-on read tools on `server`, closing over `api`.
 
@@ -131,3 +237,20 @@ def register_read_tools(server: MCPServer, api: DocsApi) -> None:
     @tool_boundary
     async def get_doc_overview_tool() -> dict:
         return await get_doc_overview(api, cache)
+
+    @server.tool(name="get_row", description=_GET_ROW_DESCRIPTION)
+    @tool_boundary
+    async def get_row_tool(table_id_or_name: str, row_id: str) -> dict:
+        return await get_row(api, cache, table_id_or_name, row_id)
+
+    @server.tool(name="find_rows", description=_FIND_ROWS_DESCRIPTION)
+    @tool_boundary
+    async def find_rows_tool(
+        table_id_or_name: str,
+        filters: dict[str, object] | None = None,
+        sort: str | None = None,
+        limit: int = 200,
+    ) -> list[dict]:
+        return await find_rows(
+            api, cache, table_id_or_name, filters=filters, sort=sort, limit=limit
+        )

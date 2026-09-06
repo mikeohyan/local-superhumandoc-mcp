@@ -11,7 +11,7 @@ from superhumandoc_mcp.buckets import Operation
 from superhumandoc_mcp.client import DocsClient
 from superhumandoc_mcp.config import Config
 from superhumandoc_mcp.deadline import Deadline
-from superhumandoc_mcp.errors import Replay
+from superhumandoc_mcp.errors import ClientError, Replay, UpstreamRefused
 from superhumandoc_mcp.throttle import Bucket
 
 
@@ -184,3 +184,60 @@ async def test_operations_resolve_the_bucket_the_map_names():
     await api.get_row("grid-x", "i-1", Deadline())
     assert client.calls[0]["operation"] == Operation.GET_ROW.value
     assert client.calls[0]["bucket"] is Bucket.READ
+
+
+def _always_504() -> DocsApi:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(504)
+
+    return _api(handler)
+
+
+def _always_400(sizes: list[int]) -> DocsApi:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sizes.append(int(request.url.params["limit"]))
+        return httpx2.Response(400)
+
+    return _api(handler)
+
+
+async def test_a_504_halves_the_page_size_and_restarts():
+    """A pageToken ignores every parameter sent beside it, so a smaller
+    `limit` cannot take effect part-way through a listing — the whole pass
+    restarts at the smaller size instead."""
+    sizes: list[int] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        size = int(request.url.params["limit"])
+        sizes.append(size)
+        if size > 50:
+            return httpx2.Response(504)
+        return httpx2.Response(200, json={"items": [], "nextPageToken": None})
+
+    api = _api(handler)
+    await api.list_rows("grid-x", Deadline(), limit=200)
+    assert sizes == [200, 100, 50]
+
+
+async def test_the_ladder_stops_at_the_floor_and_surfaces_the_hypothesis():
+    """Below the floor there is nothing left to try, and the likely cause is
+    the document's own size rather than the request's."""
+    with pytest.raises(UpstreamRefused) as caught:
+        await _always_504().list_rows("grid-x", Deadline(), limit=200)
+    assert "document" in caught.value.detail.lower()
+
+
+async def test_the_ladder_stops_when_the_deadline_does_not_the_floor():
+    expired = Deadline(total_s=0.0)
+    with pytest.raises(ClientError):
+        await _always_504().list_rows("grid-x", expired, limit=200)
+
+
+async def test_a_non_504_refusal_is_not_laddered():
+    """Only a gateway timeout means 'ask for less'. A 400 means something
+    else, and must be surfaced immediately and unchanged."""
+    sizes: list[int] = []
+    with pytest.raises(UpstreamRefused) as caught:
+        await _always_400(sizes).list_rows("grid-x", Deadline(), limit=200)
+    assert len(sizes) == 1
+    assert caught.value.status == 400

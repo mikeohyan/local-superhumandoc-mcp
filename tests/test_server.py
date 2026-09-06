@@ -36,6 +36,8 @@ async def test_lists_exactly_the_always_on_read_tools() -> None:
             "outline_page",
             "describe_table",
             "get_doc_overview",
+            "get_row",
+            "find_rows",
         }
 
 
