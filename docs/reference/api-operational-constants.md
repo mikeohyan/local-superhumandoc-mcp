@@ -1102,6 +1102,21 @@ Read directly out of the served OpenAPI document on 2026-09-04 [SPEC-VERIFIED].
 YAML-rendering digest at the same moment:
 `d145ed596a33830548e1ceac6668df94c10b71491800d0855bc0711472d0224b`.
 
+**The single-row read exists** [SPEC-VERIFIED by live probe, 2026-09-06].
+`GET /docs/{docId}/tables/{tableIdOrName}/rows/{rowIdOrName}` returned `200`
+with the row against the scratch document. This is worth recording because the
+path had never appeared in any excerpt here: it was inferred by symmetry with
+the `PUT` on the same path, and an inference is not a fact until something
+checks it.
+
+The response body carries `id`, `type`, `href`, `name`, `index`, `createdAt`,
+`updatedAt`, `browserLink`, and `values`. **`values` is keyed by column ID, not
+by column name** — the observed keys look like `c-euWseAF6J-`. A caller that
+wants cells keyed by a name a human or a model would recognise has to resolve
+those IDs against the table's column schema itself; the row endpoint does not
+do it. Note that `name` on the row is the row's own display name, which is not
+a cell value and is not a column.
+
 **Absent from the surface.** These were checked because a design decision turns
 on them, and each is an absence in the specification rather than an inference:
 
