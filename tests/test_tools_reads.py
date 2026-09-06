@@ -326,7 +326,8 @@ async def test_a_complete_listing_says_so_and_carries_no_note():
 
 
 async def test_a_listing_the_deadline_cut_short_keeps_its_rows_and_says_so():
-    """RFC 0011 rule 9: rows from the pass the deadline cut short are kept and
+    """The `request-sizing` topic: rows from the pass the deadline cut short
+    are kept and
     reported, and the tool says how far it got. find_rows pages up to the
     caller's cap, so returning fewer than that silently would present part of
     a table as the whole of it."""

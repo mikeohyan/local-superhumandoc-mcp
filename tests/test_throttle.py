@@ -86,7 +86,8 @@ async def test_a_wait_longer_than_the_deadline_is_refused_not_truncated() -> Non
 
 
 async def test_the_throttles_refusal_has_its_own_type() -> None:
-    """RFC 0011 rule 7 folds this one refusal into 'not attempted'. It must be
+    """The `request-sizing` topic folds this one refusal into 'not attempted'.
+    It must be
     catchable without also catching a deadline that simply expired."""
     clock = FakeClock()
     throttle, _ = _throttle(clock)

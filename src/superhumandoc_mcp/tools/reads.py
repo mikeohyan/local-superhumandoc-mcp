@@ -173,14 +173,16 @@ async def find_rows(
     on whether the server actually applied it. `sort`, if given, is passed
     through to the API unchanged.
 
-    Ladders through `DocsApi.list_rows`'s 504 handling (RFC 0011 rule 9),
+    Ladders through `DocsApi.list_rows`'s 504 handling, set by the
+    `request-sizing` topic,
     which has shipped tested only against a mock: no 504 has ever been
     observed from this client against the real API.
 
     Returns `{"rows", "complete", "note"}` rather than a bare list. The tool
     pages up to the caller's cap, so a short result is ambiguous on its own —
-    it could be a small table or a listing the deadline cut short, and rule 9
-    requires the difference be said aloud rather than left to be inferred.
+    it could be a small table or a listing the deadline cut short, and the
+    `request-sizing` topic requires the difference be said aloud rather than
+    left to be inferred.
     The shape does not vary with the outcome: a caller that has to test for
     the presence of a key to learn whether it saw the whole table will
     eventually forget to.

@@ -18,7 +18,8 @@ from superhumandoc_mcp.errors import Replay, UpstreamRefused
 
 LIST_PAGE_SIZE = 200
 PAGE_CONTENT_LIST_LIMIT = 500
-# RFC 0011 rule 9. A 504 on a listing restarts the whole pass at half the
+# The `request-sizing` topic's 504 rule. A 504 on a listing restarts the
+# whole pass at half the
 # page size rather than resuming: a pageToken ignores every parameter sent
 # beside it, so a smaller `limit` cannot take effect part-way through. This
 # is the floor that ladder walks down to before giving up.
@@ -135,13 +136,13 @@ class DocsApi:
         limit: int,
         params: dict[str, object] | None = None,
     ) -> Listing:
-        """Follow `nextPageToken` to `limit`, walking the 504 ladder (RFC 0011
-        rule 9) if the API answers a page with a gateway timeout.
+        """Follow `nextPageToken` to `limit`, walking the 504 ladder the
+        `request-sizing` topic sets, if the API answers with a gateway timeout.
 
         Scoped to this method alone, not to paging in general: the 504
         evidence rule 9 is built on is specific to row listing, whose natural
         page size differs from `listPages`/`listTables`/`listColumns`, and
-        RFC 0011 is explicit that inventing a ladder for those from one
+        that topic is explicit that inventing a ladder for those from one
         endpoint's evidence would be extrapolation the RFC means to rule out.
 
         A 504 halves the page size and restarts the whole pass from no

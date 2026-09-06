@@ -28,5 +28,6 @@ def test_row_writes_are_charged_to_the_doc_content_bucket():
 
 
 def test_the_export_post_follows_the_one_bucket_decision_that_exists():
-    """RFC 0012 rule 7 charges it to the write bucket until measured otherwise."""
+    """The `async-operations` topic charges it to the write bucket until
+    something measures otherwise."""
     assert bucket_for(Operation.BEGIN_PAGE_CONTENT_EXPORT) is Bucket.WRITE
