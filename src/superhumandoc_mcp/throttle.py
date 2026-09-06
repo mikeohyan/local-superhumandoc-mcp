@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 
 from superhumandoc_mcp.deadline import Deadline
-from superhumandoc_mcp.errors import ClientError
+from superhumandoc_mcp.errors import ThrottleRefused
 
 
 class Bucket(Enum):
@@ -48,7 +48,7 @@ class Throttle:
         if len(history) >= bucket.capacity:
             wait = bucket.window_s - (now - history[0])
             if not deadline.can_afford(wait):
-                raise ClientError(
+                raise ThrottleRefused(
                     "The local rate limiter would have to wait longer than this "
                     "tool call's remaining time. Batching several changes into "
                     "one call is the effective remedy."

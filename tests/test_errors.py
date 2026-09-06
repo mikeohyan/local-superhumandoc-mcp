@@ -35,3 +35,11 @@ def test_not_transmitted_does_not_claim_uncertainty() -> None:
     message = str(NotTransmitted("push_button"))
     assert "unknown" not in message
     assert "did not reach" in message
+
+
+def test_a_refusal_carries_its_status_and_detail_as_values():
+    """Parsing the message string to learn why is not an interface."""
+    err = UpstreamRefused("find_rows", 400, detail="Row is too large.")
+    assert err.status == 400
+    assert err.detail == "Row is too large."
+    assert "Row is too large." in str(err)

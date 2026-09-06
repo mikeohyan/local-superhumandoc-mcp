@@ -69,6 +69,8 @@ class UpstreamRefused(ClientError):
             f"{operation}: the API refused the request with HTTP {status}."
             + (f" {detail}" if detail else "")
         )
+        self.status = status
+        self.detail = detail
 
 
 class AuthFailure(ClientError):
@@ -80,6 +82,14 @@ class AuthFailure(ClientError):
             f"{operation}: the API rejected the token with HTTP {status}."
         )
         self.status = status
+
+
+class ThrottleRefused(ClientError):
+    """The local limiter would have to wait past this call's deadline.
+
+    Distinct from a deadline that has simply expired: no request was sent, no
+    bucket token was spent, and the work this covers was never attempted.
+    """
 
 
 class ResponseUnusable(ClientError):

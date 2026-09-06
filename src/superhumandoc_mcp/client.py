@@ -39,6 +39,31 @@ _REPLAYS_PER_REQUEST = 1
 _WHOAMI_TIMEOUT = httpx2.Timeout(10.0, connect=5.0)
 
 
+# A refusal's detail is server-supplied text that ends up in front of a model.
+# It is bounded so one enormous error body cannot crowd out a tool's real answer.
+_MAX_DETAIL_CHARS = 500
+
+
+def _detail_of(response: httpx2.Response, *, redact: str = "") -> str:
+    """Best-effort reason text. Never raises: a refusal must stay a refusal.
+
+    `redact` is the bearer token. Nothing observed has ever echoed it back, but
+    this text is the first thing the client repeats verbatim from the server,
+    and a credential that reaches a tool result has left the process.
+    """
+    try:
+        body = response.json()
+    except Exception:  # noqa: BLE001 - a body that fails to parse still refuses
+        return ""
+    if isinstance(body, dict):
+        for key in ("message", "error", "detail"):
+            value = body.get(key)
+            if isinstance(value, str) and value:
+                text = value[:_MAX_DETAIL_CHARS]
+                return text.replace(redact, "<token>") if redact else text
+    return ""
+
+
 @dataclass(frozen=True)
 class TokenIdentity:
     """What `whoami` can establish. `scoped` says WHETHER the token is
@@ -69,6 +94,7 @@ class DocsClient:
             headers={"Authorization": f"Bearer {config.api_key}"},
             follow_redirects=False,
         )
+        self._config = config
         self._throttle = throttle or Throttle(sleep=sleep)
         self._sleep = sleep
         self._rand = rand
@@ -104,7 +130,9 @@ class DocsClient:
         if failure is FailureClass.AUTH:
             raise AuthFailure("whoami", response.status_code)
         if failure is not None:
-            raise UpstreamRefused("whoami", response.status_code)
+            raise UpstreamRefused(
+                "whoami", response.status_code, _detail_of(response, redact=self._config.api_key)
+            )
         try:
             body = response.json()
         except ValueError as exc:
@@ -197,7 +225,9 @@ class DocsClient:
                     await self._wait_a_replay(deadline, operation)
                     continue
                 raise OutcomeUnknown(operation)
-            raise UpstreamRefused(operation, response.status_code)
+            raise UpstreamRefused(
+                operation, response.status_code, _detail_of(response, redact=self._config.api_key)
+            )
 
     async def _wait_a_replay(self, deadline: Deadline, operation: str) -> None:
         delay = equal_jitter(

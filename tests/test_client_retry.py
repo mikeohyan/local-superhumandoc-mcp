@@ -456,6 +456,41 @@ async def test_a_retry_after_header_is_honoured_but_clamped() -> None:
     assert slept == [60.0]
 
 
+async def test_a_refusal_detail_comes_from_the_response_body() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(400, json={"message": "Row is too large."})
+
+    client = _client(handler)
+    with pytest.raises(UpstreamRefused) as excinfo:
+        await client.request(
+            "GET", "/x", bucket=Bucket.READ, replay=Replay.SAFE,
+            deadline=Deadline(), operation="probe",
+        )
+    assert excinfo.value.detail == "Row is too large."
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx2.Response(400),
+        httpx2.Response(400, text="<html>gateway</html>"),
+        httpx2.Response(400, json={"unexpected": "shape"}),
+    ],
+)
+async def test_a_body_that_carries_no_message_still_refuses_cleanly(
+    response: httpx2.Response,
+) -> None:
+    """An unreadable body must not turn a refusal into a different failure."""
+    client = _client(lambda request: response)
+    with pytest.raises(UpstreamRefused) as excinfo:
+        await client.request(
+            "GET", "/x", bucket=Bucket.READ, replay=Replay.SAFE,
+            deadline=Deadline(), operation="probe",
+        )
+    assert excinfo.value.status == 400
+    assert excinfo.value.detail == ""
+
+
 async def test_a_replay_delay_the_deadline_cannot_afford_is_refused() -> None:
     """The third sleep site. Throttle waits and 429 backoff both refuse a sleep
     they cannot afford; the replay delay must too, or a call that has already
@@ -495,3 +530,40 @@ async def test_a_replay_delay_the_deadline_cannot_afford_is_refused() -> None:
         )
     assert calls == [1], "the replay must not be attempted"
     assert slept == [], "no truncated sleep may happen either"
+
+
+async def test_a_refusal_detail_never_echoes_the_token_back() -> None:
+    """The detail is the first thing this client repeats verbatim from the
+    server. Nothing observed echoes the token, but a credential that reaches a
+    tool result has left the process, so the path is closed rather than trusted.
+    """
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            400, json={"message": "Bad token synthetic-token-not-real supplied."}
+        )
+
+    client = _client(handler)
+    with pytest.raises(UpstreamRefused) as excinfo:
+        await client.request(
+            "GET", "/docs", bucket=Bucket.READ, replay=Replay.SAFE,
+            deadline=Deadline(), operation="find_rows",
+        )
+    assert "synthetic-token-not-real" not in str(excinfo.value)
+    assert "synthetic-token-not-real" not in excinfo.value.detail
+    assert "<token>" in excinfo.value.detail
+
+
+async def test_an_enormous_refusal_detail_is_bounded() -> None:
+    """One huge error body must not crowd out a tool's real answer."""
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(400, json={"message": "x" * 10_000})
+
+    client = _client(handler)
+    with pytest.raises(UpstreamRefused) as excinfo:
+        await client.request(
+            "GET", "/docs", bucket=Bucket.READ, replay=Replay.SAFE,
+            deadline=Deadline(), operation="find_rows",
+        )
+    assert len(excinfo.value.detail) == 500

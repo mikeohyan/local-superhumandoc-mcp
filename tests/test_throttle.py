@@ -1,7 +1,7 @@
 import pytest
 
 from superhumandoc_mcp.deadline import Deadline
-from superhumandoc_mcp.errors import ClientError
+from superhumandoc_mcp.errors import ThrottleRefused
 from superhumandoc_mcp.throttle import Bucket, Throttle
 
 
@@ -81,5 +81,17 @@ async def test_a_wait_longer_than_the_deadline_is_refused_not_truncated() -> Non
     d = Deadline(total_s=1.0, reserved_tail_s=0.0, clock=clock)
     for _ in range(2):
         await throttle.acquire(Bucket.DOC_CONTENT_WRITE, d)
-    with pytest.raises(ClientError):
+    with pytest.raises(ThrottleRefused):
+        await throttle.acquire(Bucket.DOC_CONTENT_WRITE, d)
+
+
+async def test_the_throttles_refusal_has_its_own_type() -> None:
+    """RFC 0011 rule 7 folds this one refusal into 'not attempted'. It must be
+    catchable without also catching a deadline that simply expired."""
+    clock = FakeClock()
+    throttle, _ = _throttle(clock)
+    d = Deadline(total_s=1.0, reserved_tail_s=0.0, clock=clock)
+    for _ in range(2):
+        await throttle.acquire(Bucket.DOC_CONTENT_WRITE, d)
+    with pytest.raises(ThrottleRefused):
         await throttle.acquire(Bucket.DOC_CONTENT_WRITE, d)
