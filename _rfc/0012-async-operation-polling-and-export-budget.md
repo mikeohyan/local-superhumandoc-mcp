@@ -1,9 +1,9 @@
 ---
 rfc: 0012
 title: Poll asynchronous operations on one bounded loop, and give export its own budget
-status: Proposed
+status: Accepted
 created: 2026-09-06
-decided:
+decided: 2026-09-06
 supersedes:
 superseded_by:
 topic: async-operations

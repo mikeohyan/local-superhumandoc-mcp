@@ -22,7 +22,7 @@ decision may not yet be accepted.
 
 | Topic | Current RFC | Status | Path |
 |---|---|---|---|
-| `async-operations` | 0012 | Proposed | `_rfc/0012-async-operation-polling-and-export-budget.md` |
+| `async-operations` | 0012 | Accepted | `_rfc/0012-async-operation-polling-and-export-budget.md` |
 | `upstream-api` | 0008 | Implemented | `_rfc/archive/implemented/0008-api-version-lock-and-advisory-rate-limits.md` |
 | `config-resolution` | 0006 | Implemented | `_rfc/archive/implemented/0006-credential-and-config-resolution.md` |
 | `doc-conventions` | 0009 | Implemented | `_rfc/archive/implemented/0009-documentation-reference-conventions.md` |
@@ -42,7 +42,7 @@ Proposed and Accepted: decided or awaiting decision, not yet shipped.
 |---|---|---|---|---|---|
 | 0005 | Expose element-scoped editing tools and gate destructive operations behind a flag | `tool-surface` | Accepted | 2026-09-04 | `_rfc/0005-tool-surface-and-write-safety.md` |
 | 0011 | Split oversized batches rather than refusing them, and answer a size refusal by asking for less | `request-sizing` | Accepted | 2026-09-05 | `_rfc/0011-request-sizing-and-batch-splitting.md` |
-| 0012 | Poll asynchronous operations on one bounded loop, and give export its own budget | `async-operations` | Proposed | — | `_rfc/0012-async-operation-polling-and-export-budget.md` |
+| 0012 | Poll asynchronous operations on one bounded loop, and give export its own budget | `async-operations` | Accepted | 2026-09-06 | `_rfc/0012-async-operation-polling-and-export-budget.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
