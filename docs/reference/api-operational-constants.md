@@ -241,15 +241,16 @@ write that actually succeeded is reported as failed or unknown; set too long, a
 genuinely dead request is reported slowly. That the numbers are unowned means
 nothing has decided which way that error should fall.
 
-There is also an unresolved tension to record rather than resolve here. The
-`failure-policy` topic's classification table places a 404 under "answered with a
-refusal — never replay". But a 404 from a status endpoint may mean only that the
-export or mutation ID has not yet replicated to the pod serving the request
-(§3.2), in which case the request that would follow is not a replay of anything.
-The `failure-policy` topic's own implementation notes disclaim the poll loops as
-tool-layer concerns, which is probably the reconciliation, but no document states
-that where the tension is visible. It belongs to whichever decision ends up
-claiming the poll loops.
+The 404 case reads at first like a conflict with the `failure-policy` topic,
+whose classification table places a 404 under "answered with a refusal — never
+replay", where a status poll plainly does keep asking. It is not a conflict. That
+topic's own Context already singles this case out, saying a 404 on a status poll
+is routinely not an absence at all because status ids are not immediately
+replicated across servers, and its implementation notes hand the poll loops to
+the tool layer in terms. So the table governs the individual poll request, which
+is an idempotent read rather than a replay of the operation being watched, and
+the loop around it is deliberately left to whichever decision claims it. What
+remains genuinely undecided is only the window's length.
 
 ---
 
