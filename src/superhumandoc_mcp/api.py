@@ -226,6 +226,20 @@ class DocsApi:
         )
         return response.json()
 
+    async def get_page(self, page: str, deadline: Deadline) -> dict:
+        """`read_page`'s cheap precondition: `contentType` decides whether the
+        page can be exported at all, and `updatedAt` is half the key a
+        rendered page is cached under."""
+        response = await self._client.request(
+            "GET",
+            f"/docs/{self._doc_id}/pages/{page}",
+            operation=Operation.GET_PAGE.value,
+            bucket=bucket_for(Operation.GET_PAGE),
+            deadline=deadline,
+            replay=Replay.SAFE,
+        )
+        return response.json()
+
     # --- Writes --------------------------------------------------------
     #
     # One method per mutating operation, following `get_row`'s shape: a
@@ -442,6 +456,27 @@ class DocsApi:
         )
         return response.json()
 
+    async def begin_export(
+        self, page: str, output_format: str, deadline: Deadline
+    ) -> dict:
+        """Kicks off an asynchronous page-content export. Its 202 body
+        carries `id`, not `requestId` — this is one of the three kickoffs
+        that do not answer through `/mutationStatus/`, so the id belongs on
+        `get_export_status`'s page-scoped path instead. Declares
+        `Replay.UNSAFE`: starting a second export is not a replay of the
+        first, it would contend for the blob the per-page serialisation
+        exists to prevent."""
+        response = await self._client.request(
+            "POST",
+            f"/docs/{self._doc_id}/pages/{page}/export",
+            operation=Operation.BEGIN_PAGE_CONTENT_EXPORT.value,
+            bucket=bucket_for(Operation.BEGIN_PAGE_CONTENT_EXPORT),
+            deadline=deadline,
+            replay=Replay.UNSAFE,
+            json={"outputFormat": output_format},
+        )
+        return response.json()
+
     async def get_mutation_status(self, request_id: str, deadline: Deadline) -> dict:
         """The one method whose path is not doc-scoped: `/mutationStatus`
         lives at the API root, not under `/docs/{docId}/`. Declares
@@ -452,6 +487,23 @@ class DocsApi:
             f"/mutationStatus/{request_id}",
             operation=Operation.GET_MUTATION_STATUS.value,
             bucket=bucket_for(Operation.GET_MUTATION_STATUS),
+            deadline=deadline,
+            replay=Replay.SAFE,
+        )
+        return response.json()
+
+    async def get_export_status(
+        self, page: str, request_id: str, deadline: Deadline
+    ) -> dict:
+        """Page-scoped, unlike `get_mutation_status`: the export kickoff's id
+        is not a mutation id, and `/mutationStatus/` will not accept it.
+        Declares `Replay.SAFE` — an idempotent GET, and re-reading a status
+        never replays the export it watches."""
+        response = await self._client.request(
+            "GET",
+            f"/docs/{self._doc_id}/pages/{page}/export/{request_id}",
+            operation=Operation.GET_PAGE_CONTENT_EXPORT_STATUS.value,
+            bucket=bucket_for(Operation.GET_PAGE_CONTENT_EXPORT_STATUS),
             deadline=deadline,
             replay=Replay.SAFE,
         )

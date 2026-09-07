@@ -471,3 +471,67 @@ async def test_the_guard_listings_are_document_scoped_reads(call, expected_path)
     assert recorder.kwargs["bucket"] is Bucket.READ
     assert recorder.kwargs["replay"] is Replay.SAFE
 
+
+# --- The three API calls export needs: get_page, begin_export,
+# get_export_status ---
+
+
+async def test_the_export_status_path_is_page_scoped_not_root():
+    """The mutation status path is document-agnostic and lives at the API
+    root; this one is neither. Sending an export id to /mutationStatus/ is the
+    mistake this pins against, and it would 404 in a way that looks exactly
+    like replication lag."""
+    seen: list[str] = []
+
+    class _PathRecorder:
+        async def request(self, method, path, **kwargs):
+            seen.append(path)
+            return httpx2.Response(200, json={"status": "inProgress"})
+
+    await DocsApi(_PathRecorder(), "doc-under-test").get_export_status(
+        "page-x", "req-1", Deadline()
+    )
+    assert seen == ["/docs/doc-under-test/pages/page-x/export/req-1"]
+
+
+async def test_reading_one_page_is_document_scoped():
+    """`get_page` is the cheap read `read_page` makes before deciding whether
+    to export at all. Nothing else in this wave pins its path, and a wrong one
+    would surface as a 404 that reads like a missing page."""
+    seen: list[str] = []
+
+    class _PathRecorder:
+        async def request(self, method, path, **kwargs):
+            seen.append(path)
+            self.kwargs = kwargs
+            return httpx2.Response(200, json={"contentType": "canvas"})
+
+    recorder = _PathRecorder()
+    await DocsApi(recorder, "doc-under-test").get_page("page-x", Deadline())
+    assert seen == ["/docs/doc-under-test/pages/page-x"]
+    assert recorder.kwargs["bucket"] is Bucket.READ
+
+
+async def test_the_kickoff_names_the_output_format_it_was_given():
+    """The two formats carry different content, so a method that ignored this
+    argument would silently return the wrong one rather than failing."""
+    body = await _body_sent_by(
+        lambda api: api.begin_export("page-x", "html", Deadline())
+    )
+    assert body == {"outputFormat": "html"}
+
+
+@pytest.mark.parametrize(
+    "method,args,expected",
+    [
+        ("get_export_status", ("page-x", "r"), Replay.SAFE),
+        ("get_page", ("page-x",), Replay.SAFE),
+        ("begin_export", ("page-x", "markdown"), Replay.UNSAFE),
+    ],
+)
+async def test_reads_may_be_replayed_and_a_kickoff_may_not(method, args, expected):
+    """Starting a second export is not a replay of the first -- it would
+    contend for the same blob, which is the collision the per-page
+    serialisation exists to prevent."""
+    assert await _replay_used_by(method, args) is expected
+
