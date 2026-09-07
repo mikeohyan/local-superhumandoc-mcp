@@ -21,10 +21,13 @@ from superhumandoc_mcp.gate import ExportGate
 from superhumandoc_mcp.schema_cache import ColumnCache
 from superhumandoc_mcp.tools.boundary import tool_boundary
 
-# The only contentType read_page can export. Embed and sync pages are
-# refused before any export is attempted, because contentType is readable
-# up front -- the tool-surface topic requires that refusal name the type
-# found rather than let a caller discover it from a failed export.
+# The only contentType read_page can export. Every other type is refused
+# before any export is attempted, because contentType is readable up front
+# -- the tool-surface topic requires that refusal name the type found rather
+# than let a caller discover it from a failed export. Only `syncPage` has
+# been observed failing an export (docs/reference/api-operational-constants.md
+# §3.2 item 1 records `embed` as untested), so the refusal is stated as this
+# tool's own precondition rather than as a claim about the API.
 _EXPORTABLE_CONTENT_TYPE = "canvas"
 
 # The export supports markdown too, and the two differ -- markdown drops
@@ -81,10 +84,12 @@ _READ_PAGE_DESCRIPTION = (
     "buttons, controls, callouts and dividers may be missing or flattened "
     "in the rendered output, so this must not be treated as an "
     "authoritative account of everything the page contains. Requires "
-    "`contentType == \"canvas\"`; embed and sync pages cannot be exported "
-    "and are refused, naming the content type found, before any export is "
-    "attempted. Rendered content is cached against the page's `updatedAt`, "
-    "so re-reading an unchanged page is cheap. Its output must not be sent "
+    "`contentType == \"canvas\"`: any other type is refused, naming the "
+    "type found, before any export is attempted — a sync page is known to "
+    "fail the export, and no other type has been tried. Rendered content is "
+    "cached against the page's `updatedAt`, so re-reading an unchanged page "
+    "is cheap; a page that reports no `updatedAt` is not cached at all and "
+    "pays for a full export every time. Its output must not be sent "
     "back to create_page, append_to_page, replace_element, or any other "
     "write on this surface — writing a read back out is exactly the loop "
     "that compounds content loss on every pass."
@@ -269,11 +274,25 @@ async def find_rows(
 
 
 class PageCache:
-    """Caches a page's rendered HTML, keyed on `(page_id, updatedAt)` —
-    both parts, never `updatedAt` alone. Two pages sharing a timestamp is
+    """Caches a page's rendered HTML against `(page_id, updatedAt)` — both
+    parts, never `updatedAt` alone. Two pages sharing a timestamp is
     ordinary after a bulk edit or a duplicated template; keying on the
     timestamp alone would serve one page's render for the other, which is
     silent wrong-page content.
+
+    `page_id` is the canonical id from the `getPage` body, not whatever
+    string the caller used to name the page — see `read_page`, which
+    resolves it. Two entries for one page, one under its id and one under a
+    name, is the same wrong-page content by a different route, because a
+    name can later be moved to a different page.
+
+    One slot per page, replaced whenever the timestamp changes. Both parts
+    still have to match for a `get` to hit, so a stale timestamp misses
+    exactly as it would with an entry of its own — nothing is lost, since a
+    superseded `updatedAt` is never asked for again, and the dict then
+    plateaus at the document's page count the way `ExportGate._per_page`
+    does. Keeping every timestamp instead would grow a full HTML render per
+    edit-then-read, for the life of the process.
 
     A missing or null `updatedAt` is not a cache key at all: `get` always
     misses and `set` is a no-op, because a render that cannot be
@@ -281,17 +300,26 @@ class PageCache:
     """
 
     def __init__(self) -> None:
-        self._entries: dict[tuple[str, str], str] = {}
+        self._entries: dict[str, tuple[str, str]] = {}
+
+    def __len__(self) -> int:
+        """How many pages are held. Public so the bound this class claims is
+        something a test can assert rather than something a docstring
+        asserts — that is precisely how the unbounded version shipped."""
+        return len(self._entries)
 
     def get(self, page_id: str, updated_at: str | None) -> str | None:
         if updated_at is None:
             return None
-        return self._entries.get((page_id, updated_at))
+        entry = self._entries.get(page_id)
+        if entry is None or entry[0] != updated_at:
+            return None
+        return entry[1]
 
     def set(self, page_id: str, updated_at: str | None, html: str) -> None:
         if updated_at is None:
             return
-        self._entries[(page_id, updated_at)] = html
+        self._entries[page_id] = (updated_at, html)
 
 
 async def read_page(
@@ -312,6 +340,19 @@ async def read_page(
     and a failed export. The same read's `updatedAt` is the cache key's
     other half, so an unchanged page never pays for a second export.
 
+    That read also answers the page's canonical `id`, and the cache key and
+    the gate key are both resolved to it rather than to whatever string the
+    caller used. A page is addressed as `pageIdOrName`, so a caller that
+    names one is doing the ordinary thing, and two callers naming one page
+    differently must still meet: keyed on the raw argument they take
+    different per-page gate slots and export at once, contending for the one
+    blob the gate exists to serialise, and they leave the cache holding two
+    entries for one page — which serves the wrong page's HTML as soon as a
+    name is moved to a different page that shares an `updatedAt`. This is
+    the pre-write guard's bug from the other side: `tools/guard.py` matches
+    a page reference on its name as well as its id; here the name is
+    resolved to the id.
+
     The export itself runs inside `gate.for_page(...)`: exports of one page
     are serialised because the blob they render into is keyed by page and
     document, not by request id, so two concurrent exports of the same page
@@ -321,18 +362,37 @@ async def read_page(
     page = await api.get_page(page_id_or_name, deadline)
     content_type = page.get("contentType")
     if content_type != _EXPORTABLE_CONTENT_TYPE:
+        # An absent field and a field holding a type this tool refuses are
+        # different findings, and this sentence reaches the model verbatim.
+        # "has contentType None" reads as a verdict about the page.
+        found = (
+            f"has contentType {content_type!r}"
+            if content_type is not None
+            else "did not report a contentType"
+        )
         raise ClientError(
-            f"page {page_id_or_name!r} has contentType {content_type!r}, "
-            "which cannot be exported — only canvas pages can be read this "
-            "way."
+            f"page {page_id_or_name!r} {found}, so it cannot be exported — "
+            "only canvas pages can be read this way."
         )
 
     updated_at = page.get("updatedAt")
-    cached = cache.get(page_id_or_name, updated_at)
+    page_id = page.get("id") or page_id_or_name
+    cached = cache.get(page_id, updated_at)
     if cached is not None:
         return {"html": cached}
 
-    async with gate.for_page(page_id_or_name, deadline):
+    async with gate.for_page(page_id, deadline):
+        # Looked up again now the gate is held, because the wait is exactly
+        # when another reader of this page finishes and caches its render.
+        # `updated_at` was read before the gate and is the same key it was
+        # then, so a hit here is this page's current content. Without this
+        # second look the waiting reader re-exports what it was waiting for
+        # — and can fail doing it, since it acquires with less budget left
+        # and its export ceiling is clamped to what remains, so it reports
+        # a missed export deadline while the HTML sits in the cache.
+        cached = cache.get(page_id, updated_at)
+        if cached is not None:
+            return {"html": cached}
         html = await export_page(
             api,
             downloader,
@@ -342,7 +402,9 @@ async def read_page(
             clock=clock,
             sleep=sleep,
         )
-    cache.set(page_id_or_name, updated_at, html)
+        # Inside the gate, so the render is visible to the next reader the
+        # moment the slot it is waiting for is released.
+        cache.set(page_id, updated_at, html)
     return {"html": html}
 
 
@@ -405,7 +467,7 @@ def register_read_tools(
         filters: dict[str, object] | None = None,
         sort: str | None = None,
         limit: int = 200,
-    ) -> list[dict]:
+    ) -> dict:
         return await find_rows(
             api, columns, table_id_or_name, filters=filters, sort=sort, limit=limit
         )

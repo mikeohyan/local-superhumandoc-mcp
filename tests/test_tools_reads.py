@@ -3,6 +3,7 @@ vocabulary and `api.py`, wrapped by `tool_boundary` and registered by
 `register_read_tools`.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import pytest
@@ -384,31 +385,91 @@ async def test_a_listing_the_deadline_cut_short_keeps_its_rows_and_says_so():
 # --- read_page -----------------------------------------------------------
 
 
+_PAGE_ID = "canvas-Ah3k1FvQ2-"
+_STAMP = "2026-09-07T10:00:00Z"
+
+
 class _PageApi:
     """Stands in for `DocsApi` for `read_page`: answers `get_page` with a
-    fixed `contentType`/`updatedAt`, and completes exactly one export via
-    `begin_export`/`get_export_status` — a single poll that always comes
+    fixed `id`/`contentType`/`updatedAt`, and completes exactly one export
+    via `begin_export`/`get_export_status` — a single poll that always comes
     back terminal. The poll loop itself is `export.py`'s own concern,
     exercised on its own terms in tests/test_export.py; what these tests pin
     is what `read_page` does around it — the content-type gate, the cache,
-    and entering the gate — not the loop's shape."""
+    and entering the gate — not the loop's shape.
 
-    def __init__(self, *, content_type: str, updated_at: str | None = None) -> None:
+    `id` is answered because the real `getPage` body carries it and
+    `read_page` keys the cache and the gate on it. A double that omitted it
+    would let a `read_page` keyed on the caller's raw string pass every test
+    here, which is exactly how that shipped.
+
+    `error` turns the single poll terminal-with-a-failure instead, which is
+    how a failed render is spelled to `export.py`; `export_formats` records
+    what each kickoff was asked for, because nothing else pins the format
+    the tool actually sends.
+    """
+
+    def __init__(
+        self,
+        *,
+        content_type: str,
+        updated_at: str | None = None,
+        page_id: str = _PAGE_ID,
+        error: str | None = None,
+    ) -> None:
         self.content_type = content_type
         self.updated_at = updated_at
+        self.page_id = page_id
+        self.error = error
+        self.export_formats: list[str] = []
         self._next_id = 0
 
     async def get_page(self, page: str, deadline: Deadline) -> dict:
-        return {"contentType": self.content_type, "updatedAt": self.updated_at}
+        return {
+            "id": self.page_id,
+            "contentType": self.content_type,
+            "updatedAt": self.updated_at,
+        }
 
     async def begin_export(self, page: str, output_format: str, deadline: Deadline) -> dict:
+        self.export_formats.append(output_format)
         self._next_id += 1
         return {"id": f"export-{self._next_id}"}
 
     async def get_export_status(
         self, page: str, request_id: str, deadline: Deadline
     ) -> dict:
+        if self.error is not None:
+            return {"error": self.error}
         return {"downloadLink": f"https://example.test/{page}/{request_id}"}
+
+
+class _BlockingPageApi(_PageApi):
+    """A `_PageApi` whose export parks until `release` is set, so a second
+    reader is guaranteed to be waiting on the gate while the first is still
+    inside it. Starting two tasks and hoping would pass whether or not the
+    second one re-checked the cache."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.inside = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def begin_export(self, page: str, output_format: str, deadline: Deadline) -> dict:
+        self.inside.set()
+        await self.release.wait()
+        return await super().begin_export(page, output_format, deadline)
+
+
+async def _settle() -> None:
+    """Let every runnable task reach its next real suspension point.
+
+    The fake `sleep` from `_fixtures` advances a counter and never yields, so
+    a test that needs one task to be *blocked on the gate* rather than merely
+    created has to hand the loop back explicitly.
+    """
+    for _ in range(20):
+        await asyncio.sleep(0)
 
 
 class _RecordingGate:
@@ -494,12 +555,15 @@ async def test_two_pages_sharing_a_timestamp_do_not_share_a_render():
     alone -- a fair reading of "cached against updatedAt" -- this returns page
     A's HTML for page B, which is silent wrong-page content and the worst thing
     this tool could do. Two pages sharing an updatedAt is ordinary after a bulk
-    edit or a duplicated template."""
+    edit or a duplicated template. The two pages differ by their canonical
+    id, which is what the key is built from -- the names they are read by
+    are incidental and would not distinguish them if the key were the
+    caller's string."""
     clock, _, sleep = _fixtures()
     stamp = "2026-09-07T10:00:00Z"
     cache = PageCache()
     a = await read_page(
-        _PageApi(content_type="canvas", updated_at=stamp),
+        _PageApi(content_type="canvas", updated_at=stamp, page_id="canvas-aaa"),
         _fixed_downloader("<p>A</p>"),
         ExportGate(),
         cache,
@@ -508,7 +572,7 @@ async def test_two_pages_sharing_a_timestamp_do_not_share_a_render():
         sleep=sleep,
     )
     b = await read_page(
-        _PageApi(content_type="canvas", updated_at=stamp),
+        _PageApi(content_type="canvas", updated_at=stamp, page_id="canvas-bbb"),
         _fixed_downloader("<p>B</p>"),
         ExportGate(),
         cache,
@@ -549,7 +613,202 @@ async def test_the_export_runs_inside_the_gate():
         clock=clock,
         sleep=sleep,
     )
-    assert gate.entered == ["page-x"]
+    assert gate.entered == [_PAGE_ID]
+
+
+async def test_the_gate_and_the_cache_are_keyed_on_the_canonical_page_id():
+    """A page is addressed as `pageIdOrName`, so a caller that names a page is
+    doing the ordinary thing — and two callers naming one page differently
+    must still meet. Keyed on the caller's raw string, a read by id and a
+    read by name take *different* per-page gate slots and both export at
+    once, contending for the one `DOC_EXPORT_RENDERING/{pageId}/{docId}` blob
+    the gate exists to protect, and they leave two cache entries for one
+    page. `getPage` answers the canonical id, so both keys resolve to it.
+    This is the same fix the pre-write guard already shipped, from the other
+    side: there a page reference was matched on its name as well as its id,
+    here the name is resolved to the id."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at=_STAMP)
+    gate, cache = _RecordingGate(), PageCache()
+    downloader = _counting_downloader("<p>x</p>")
+    for named in (_PAGE_ID, "Q3 Plan"):
+        await read_page(
+            api, downloader, gate, cache, named, clock=clock, sleep=sleep
+        )
+    assert gate.entered == [_PAGE_ID]
+    assert downloader.calls == 1
+    assert len(cache) == 1
+
+
+async def test_a_read_by_id_and_a_read_by_name_take_the_same_gate_slot():
+    """The gate half of the same defect, with the cache taken out of it: a
+    page with no `updatedAt` is never cached, so both reads reach the gate
+    and the only thing that can make them agree is the key."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at=None)
+    gate = _RecordingGate()
+    for named in (_PAGE_ID, "Q3 Plan"):
+        await read_page(
+            api, _fixed_downloader("x"), gate, PageCache(), named,
+            clock=clock, sleep=sleep,
+        )
+    assert gate.entered == [_PAGE_ID, _PAGE_ID]
+
+
+async def test_a_name_moved_to_another_page_does_not_serve_the_first_ones_html():
+    """Read page A as "Q3 Plan", rename A away, rename B to "Q3 Plan". If B
+    shares A's `updatedAt` — ordinary after a bulk edit or a duplicated
+    template — a cache keyed on the caller's string returns A's HTML for B,
+    silently. Keyed on the canonical id it cannot."""
+    clock, _, sleep = _fixtures()
+    cache = PageCache()
+    rendered = []
+    for page_id, html in (("canvas-aaa", "<p>A</p>"), ("canvas-bbb", "<p>B</p>")):
+        result = await read_page(
+            _PageApi(content_type="canvas", updated_at=_STAMP, page_id=page_id),
+            _fixed_downloader(html),
+            ExportGate(),
+            cache,
+            "Q3 Plan",
+            clock=clock,
+            sleep=sleep,
+        )
+        rendered.append(result["html"])
+    assert rendered == ["<p>A</p>", "<p>B</p>"]
+
+
+async def test_a_reader_that_waited_on_the_gate_takes_the_render_it_waited_for():
+    """The cache is checked again after the gate is acquired, not only before
+    it. Both readers miss on the way in; the second one blocks, and by the
+    time it acquires, the first has already cached the very render it wants.
+    Exporting again is not merely wasteful — the second reader arrives with
+    less budget left, its export ceiling is clamped to what remains, and it
+    can fail with "did not complete within the export deadline" while the
+    HTML it asked for is sitting in the cache. `updatedAt` was read before
+    the gate and does not change while the reader waits, so the second look
+    uses the same key as the first."""
+    clock, _, sleep = _fixtures()
+    api = _BlockingPageApi(content_type="canvas", updated_at=_STAMP)
+    gate, cache = ExportGate(), PageCache()
+    downloader = _counting_downloader("<p>x</p>")
+
+    def start():
+        return asyncio.create_task(
+            read_page(api, downloader, gate, cache, _PAGE_ID, clock=clock, sleep=sleep)
+        )
+
+    first = start()
+    await api.inside.wait()
+    second = start()
+    await _settle()
+    api.release.set()
+    a, b = await asyncio.gather(first, second)
+    assert downloader.calls == 1
+    assert a["html"] == b["html"] == "<p>x</p>"
+
+
+async def test_read_page_exports_html_not_markdown():
+    """The two formats are not interchangeable: markdown drops the
+    page-level attachments HTML retains
+    (docs/reference/api-operational-constants.md §2.5), and the tool's
+    description promises HTML. Nothing else in this suite reads the format
+    the kickoff is handed, so flipping the constant would ship a fidelity
+    regression with everything green."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas")
+    await read_page(
+        api, _fixed_downloader("x"), ExportGate(), PageCache(), _PAGE_ID,
+        clock=clock, sleep=sleep,
+    )
+    assert api.export_formats == ["html"]
+
+
+async def test_a_failed_export_reaches_the_caller_as_its_own_message():
+    """`export_page` raises `ClientError` on a terminal `error`, and
+    `read_page` is the only thing between that and the model. Swallowing it
+    into an empty render, or letting some other exception out, both end as
+    the SDK's redacted "Error executing tool read_page"."""
+    clock, _, sleep = _fixtures()
+    with pytest.raises(ClientError) as caught:
+        await read_page(
+            _PageApi(content_type="canvas", updated_at=_STAMP, error="render blew up"),
+            _fixed_downloader("x"),
+            ExportGate(),
+            PageCache(),
+            _PAGE_ID,
+            clock=clock,
+            sleep=sleep,
+        )
+    assert "render blew up" in str(caught.value)
+
+
+async def test_a_failed_render_is_not_cached():
+    """Nothing is stored for an export that never produced content, so the
+    next read tries again rather than being told forever that a page it
+    could render cannot be rendered."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at=_STAMP, error="render blew up")
+    cache, downloader = PageCache(), _counting_downloader("<p>x</p>")
+    with pytest.raises(ClientError):
+        await read_page(
+            api, downloader, ExportGate(), cache, _PAGE_ID, clock=clock, sleep=sleep
+        )
+    assert len(cache) == 0
+    api.error = None
+    result = await read_page(
+        api, downloader, ExportGate(), cache, _PAGE_ID, clock=clock, sleep=sleep
+    )
+    assert result["html"] == "<p>x</p>"
+
+
+async def test_a_page_read_over_and_over_holds_one_cache_entry():
+    """`ExportGate._per_page` plateaus at the document's page count because a
+    page is one key. A cache keyed on the page *and* its `updatedAt` does
+    not: every edit-then-read adds a permanent entry holding a whole HTML
+    render, and nothing ever asks for a superseded timestamp again. One slot
+    per page bounds it and loses nothing."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas")
+    cache = PageCache()
+    for hour in range(6):
+        api.updated_at = f"2026-09-07T1{hour}:00:00Z"
+        await read_page(
+            api, _fixed_downloader(f"<p>{hour}</p>"), ExportGate(), cache, _PAGE_ID,
+            clock=clock, sleep=sleep,
+        )
+    assert len(cache) == 1
+
+
+def test_a_superseded_timestamp_still_misses():
+    """Bounding the cache must not cost the key its meaning: one slot per
+    page replaces the entry, it does not stop comparing the timestamp. A
+    `get` for the timestamp that was overwritten misses, exactly as it did
+    when both stamps had their own entry."""
+    cache = PageCache()
+    cache.set("canvas-aaa", "t1", "<p>old</p>")
+    cache.set("canvas-aaa", "t2", "<p>new</p>")
+    assert cache.get("canvas-aaa", "t1") is None
+    assert cache.get("canvas-aaa", "t2") == "<p>new</p>"
+
+
+async def test_a_page_with_no_content_type_is_refused_without_a_verdict_on_its_type():
+    """Failing closed is right; reporting an absent field as a definite
+    finding is not. "has contentType None" reads as a statement about the
+    page, and this string reaches the model verbatim."""
+    clock, _, sleep = _fixtures()
+    with pytest.raises(ClientError) as caught:
+        await read_page(
+            _PageApi(content_type=None),
+            _fixed_downloader("x"),
+            ExportGate(),
+            PageCache(),
+            _PAGE_ID,
+            clock=clock,
+            sleep=sleep,
+        )
+    message = str(caught.value)
+    assert "None" not in message
+    assert "did not report a contentType" in message
 
 
 async def test_read_page_says_what_it_is_and_what_must_not_be_done_with_it():
