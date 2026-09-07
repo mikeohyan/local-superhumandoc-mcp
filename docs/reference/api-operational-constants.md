@@ -1219,6 +1219,41 @@ The page write surface in full: `POST /docs/{docId}/pages` (create),
 `POST .../export` + `GET .../export/{requestId}` for the asynchronous markdown
 or HTML read.
 
+**`contentUpdate` can be scoped to a single element, and element IDs survive
+the write** [probe B6, measured live 2026-09-07]. This was the open question
+that decided whether an anchored edit is possible at all, and both halves came
+back clean.
+
+A page was created with three known paragraphs, `listPageContent` was read for
+their element IDs, and a `PUT /docs/{docId}/pages/{pageId}` was sent carrying
+`{"contentUpdate": {"insertionMode": "replace", "elementId": "cl-GQI0miY3Cs",
+"canvasContent": {"format": "markdown", "content": "REPLACED ONLY THIS LINE"}}}`.
+It answered 202 with a `requestId`; `getMutationStatus` reported `completed`
+after ~18 s. Reading the page back:
+
+| Element ID | Before | After |
+|---|---|---|
+| `cl-RVeKFUvHVD` | `ALPHA one` | `ALPHA one` |
+| `cl-GQI0miY3Cs` | `BRAVO two` | `REPLACED ONLY THIS LINE` |
+| `cl-9rkApkV1hy` | `CHARLIE three` | `CHARLIE three` |
+
+Two facts, and the second is the one that is easy to forget to check:
+
+- **The named element alone changed.** `elementId` is honoured rather than
+  accepted and ignored, so a scoped replace is a real primitive and not a
+  whole-page write wearing a narrower name. The failure this ruled out was the
+  worse of the two possible ones: a field accepted and silently ignored would
+  have let a client destroy a page while believing it had edited one line.
+- **All three element IDs were unchanged after the write**, the replaced one
+  included. So an ID read earlier in a tool call is still valid after a write
+  in the same call, and an anchored edit does not have to re-resolve IDs
+  immediately before every operation. This is a single observation on a
+  three-line page, not a guarantee across page shapes or across long gaps.
+
+Both were measured on a page of plain paragraphs. Nothing here says what a
+scoped replace does when the target element is a table, a button or a control —
+that is the question B1 and B2 still hold, and it is unaffected by this result.
+
 # 7. Primary sources
 
 | Source | Establishes |
