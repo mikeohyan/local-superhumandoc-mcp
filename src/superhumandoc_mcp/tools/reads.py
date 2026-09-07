@@ -232,17 +232,18 @@ async def find_rows(
     return {"rows": resolved, "complete": listing.complete, "note": note}
 
 
-def register_read_tools(server: MCPServer, api: DocsApi) -> None:
+def register_read_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) -> None:
     """Register the always-on read tools on `server`, closing over `api`.
 
     The registered tool cannot take `api` as a model-visible parameter, so
     each one here is a thin wrapper that closes over the single `DocsApi`
     instance passed in and delegates to the directly-testable function above.
-    One `ColumnCache` is created here and shared between `describe_table` and
-    `get_doc_overview`, so the two tools warm each other rather than each
-    keeping its own copy.
+    `cache` is constructed once in `build_server` and passed in, rather than
+    built here, so the write tools this server also registers resolve
+    columns through the same `ColumnCache` — two copies would disagree after
+    the first write, which is exactly the case `schema_cache.py` warns
+    about.
     """
-    cache = ColumnCache(api)
 
     @server.tool(name="outline_page", description=_OUTLINE_PAGE_DESCRIPTION)
     @tool_boundary

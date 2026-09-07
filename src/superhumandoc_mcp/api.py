@@ -264,11 +264,12 @@ class DocsApi:
         at the top level, so it is wrapped here rather than left to callers
         to get right.
 
-        `insertion_mode` defaults to `append`, which is the only additive
-        mode and therefore the only safe default. `replace` with no
-        `element_id` rewrites the whole page, and the three page-write tools
-        differ from each other in exactly these two arguments — so they are
-        parameters rather than something a later caller bolts on.
+        `insertion_mode` defaults to `append`. Both `append` and `prepend`
+        are additive; `replace` with no `element_id` rewrites the whole page,
+        so the default is the one mode that adds at the end and can surprise
+        no one. The page-write tools differ from each other in exactly these
+        two arguments, so they are parameters rather than something a later
+        caller bolts on.
 
         `element_id` narrows a `replace` to the single named element.
         Measured on 2026-09-07: the named element alone changes, and every

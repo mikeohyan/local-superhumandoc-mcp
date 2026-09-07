@@ -24,7 +24,7 @@ def _config(allow_destructive: bool = False) -> Config:
     )
 
 
-async def test_lists_exactly_the_always_on_read_tools() -> None:
+async def test_lists_exactly_the_always_on_tools() -> None:
     """Deliberately an exact set rather than a subset. This is the whole tool
     surface a model sees, so it should fail when a tool appears by accident
     as loudly as when an intended one goes missing. Widen it when a task
@@ -38,6 +38,10 @@ async def test_lists_exactly_the_always_on_read_tools() -> None:
             "get_doc_overview",
             "get_row",
             "find_rows",
+            "create_page",
+            "append_to_page",
+            "rename_page",
+            "replace_element",
         }
 
 
