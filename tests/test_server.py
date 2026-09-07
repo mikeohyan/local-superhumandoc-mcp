@@ -42,6 +42,8 @@ async def test_lists_exactly_the_always_on_tools() -> None:
             "append_to_page",
             "rename_page",
             "replace_element",
+            "update_row",
+            "upsert_rows",
         }
 
 
