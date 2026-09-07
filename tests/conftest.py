@@ -17,6 +17,7 @@ from pathlib import Path
 from mcp import Client
 
 from superhumandoc_mcp.config import Config
+from superhumandoc_mcp.errors import DownloadUnusable
 
 
 class FakeClock:
@@ -144,3 +145,53 @@ async def _tool_names(server) -> set[str]:
     """
     async with Client(server) as client:
         return {tool.name for tool in (await client.list_tools()).tools}
+
+
+class _Downloads:
+    """Stands in for `downloads.Downloader` wherever a test drives an export.
+
+    Counts fetches, answers each URL from `bodies`, and raises
+    `DownloadUnusable` for any URL in `dead` — which is how a stale link is
+    spelled to the export loop, since that is the exception the real
+    downloader raises when a link has expired. `dead_all` fails every URL, for
+    the case where a link never comes good however many times it is re-minted.
+    """
+
+    def __init__(
+        self,
+        bodies: dict[str, str] | None = None,
+        *,
+        default: str = "",
+        dead: set[str] | None = None,
+        dead_all: bool = False,
+    ) -> None:
+        self._bodies = bodies or {}
+        self._default = default
+        self._dead = dead or set()
+        self._dead_all = dead_all
+        self.calls = 0
+
+    async def fetch(self, url: str, deadline) -> str:
+        self.calls += 1
+        if self._dead_all or url in self._dead:
+            raise DownloadUnusable(url, "this test double treats it as dead")
+        return self._bodies.get(url, self._default)
+
+
+def _fixed_downloader(body: str) -> _Downloads:
+    return _Downloads(default=body)
+
+
+def _counting_downloader(body: str) -> _Downloads:
+    """The same object as `_fixed_downloader`, under the name a test reads
+    when the point is `.calls` rather than the body."""
+    return _Downloads(default=body)
+
+
+def _downloader_failing_on(url: str, *, then: str) -> _Downloads:
+    return _Downloads(default=then, dead={url})
+
+
+def _always_failing_downloader() -> _Downloads:
+    return _Downloads(dead_all=True)
+
