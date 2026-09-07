@@ -927,7 +927,66 @@ the download rules. This section records what the endpoints do and what has been
 observed of them; it does not restate that decision, and it does not say what the
 client does. See the note at the end of §3.2 for the one thing still open.
 
+**An export runs end to end in single-digit seconds** [probe E1, measured live
+2026-09-07, three runs against the scratch document]. This is the first
+measurement of export duration of any kind; every number in §1.4 was previously
+reasoning from staff prose about other people's documents.
+
+| Run | Page | Format | Kickoff | Polling | Download | Total |
+|---|---|---|---|---|---|---|
+| 1 | three paragraphs | markdown | 0.3 s | 2.6 s, 2 polls | 0.2 s | **3.1 s** |
+| 2 | TORTURE-MD | markdown | 1.6 s | 4.8 s, 3 polls | 0.2 s | **6.6 s** |
+| 3 | TORTURE-MD | html | 0.2 s | 2.4 s, 2 polls | 0.2 s | **2.9 s** |
+
+Polling was at a flat two seconds, so "2 polls" means the export was ready
+somewhere inside the first four seconds rather than that it took exactly that
+long. Three runs on two small pages is not a distribution, and says nothing
+about a large document under load — but it does establish the order of
+magnitude, which was previously unknown to within two orders.
+
+The consequence that matters: a page read that runs an export fits inside a
+single tool call with room to spare, against the 80-second working budget. The
+concern that it might not — which would have made a synchronous page-read tool
+unbuildable as designed — is not borne out.
+
+**The kickoff returns `{id, status, href}`** — no `requestId`, confirming live
+what §6 records from the specification. The id is polled on the export's own
+path, and `/mutationStatus/` will not accept it.
+
+**A dead link answers 403 with `Content-Type: application/xml`** [probe E1,
+2026-09-07]. Provoked by corrupting the signature on a live link rather than by
+waiting for one to expire, so this is the wrong-signature case; an
+*expired*-link body has still never been observed and may differ. The response
+body begins `3c 3f 78 6d 6c` — `<?xml` — and carries **no `Content-Encoding`**:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature we
+calculated does not match the signature you provided...
+```
+
+A good body, by contrast, begins `1f 8b 08` — the gzip magic — and carries
+`Content-Encoding: gzip` with `Content-Type: text/plain` for markdown or
+`text/html` for HTML.
+
+So there are three discriminators, and **`Content-Type` is the cheapest of the
+three**: `application/xml` against `text/plain`/`text/html` separates the two
+cases without reading the body at all. That matters to an implementer, because
+the magic-byte check is the awkward one — httpx2 decodes `Content-Encoding`
+transparently for `.content`, `.text` and `.json()`, so seeing `1f 8b` at all
+requires `iter_raw`/`aiter_raw`. A client that checks the header and the content
+type never needs to reach for the raw stream.
+
 ## 3.1 `downloadLink` and `error` are the only guaranteed signals; `status` is not
+
+**`status` was nonetheless present and accurate in all three E1 runs**
+[2026-09-07], reading `inProgress` and then `complete`, and flipping to
+`complete` on exactly the poll that first carried a `downloadLink`. That is an
+observation, not a licence: the field remains absent from the schema, so a
+client that keyed on it would be depending on something the specification does
+not promise and that no error path has been observed to populate. The rule
+below stands — wait for `downloadLink` or `error` — and `status` is at most a
+diagnostic to log.
 
 **`PageContentExportStatus` is a dangling enum.** [SPEC-VERIFIED] It is defined:
 
