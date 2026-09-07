@@ -14,6 +14,7 @@ class Operation(StrEnum):
     LIST_PAGE_CONTENT = "listPageContent"
     LIST_ROWS = "listRows"
     GET_ROW = "getRow"
+    GET_PAGE = "getPage"
     BEGIN_PAGE_CONTENT_EXPORT = "beginPageContentExport"
     GET_PAGE_CONTENT_EXPORT_STATUS = "getPageContentExportStatus"
     GET_MUTATION_STATUS = "getMutationStatus"
@@ -38,6 +39,7 @@ _BUCKETS: dict[Operation, Bucket] = {
     Operation.LIST_PAGE_CONTENT: Bucket.READ,
     Operation.LIST_ROWS: Bucket.READ,
     Operation.GET_ROW: Bucket.READ,
+    Operation.GET_PAGE: Bucket.READ,
     Operation.GET_PAGE_CONTENT_EXPORT_STATUS: Bucket.READ,
     Operation.GET_MUTATION_STATUS: Bucket.READ,
     # The one bucket decision an RFC has actually made.
