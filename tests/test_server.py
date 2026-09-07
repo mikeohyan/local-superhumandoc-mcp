@@ -11,6 +11,7 @@ from mcp import Client
 
 from superhumandoc_mcp.config import Config
 from superhumandoc_mcp.server import build_server
+from tests.conftest import _GATED_NAMES, _tool_names
 
 
 def _config(allow_destructive: bool = False) -> Config:
@@ -57,13 +58,20 @@ async def test_every_registered_tool_describes_itself() -> None:
             assert tool.description, f"{tool.name} has no description"
 
 
-async def test_the_destructive_gate_adds_no_tools_in_this_wave() -> None:
-    """The gate is real, but nothing sits behind it yet: the registered tool
-    set must be identical with the flag on and off. This is the invariant
-    worth pinning now, because it will start failing the moment a gated tool
-    is added — which is exactly when someone should look."""
-    async with Client(build_server(_config(allow_destructive=False))) as off_client:
-        off_names = {tool.name for tool in (await off_client.list_tools()).tools}
-    async with Client(build_server(_config(allow_destructive=True))) as on_client:
-        on_names = {tool.name for tool in (await on_client.list_tools()).tools}
-    assert on_names == off_names
+async def test_gated_tools_are_absent_when_the_flag_is_unset() -> None:
+    """Unregistered, not merely refusing: with the flag off, the model
+    cannot see a gated tool's name at all, so no per-call permission
+    decision ever arises for it."""
+    names = await _tool_names(build_server(_config(allow_destructive=False)))
+    assert not (_GATED_NAMES & names)
+
+
+async def test_the_flag_adds_exactly_the_gated_tools_and_nothing_else() -> None:
+    """Supersedes test_the_destructive_gate_adds_no_tools_in_this_wave, which
+    pinned the opposite fact before any gated tool existed. An exact-set
+    difference, not a superset check, so a seventh tool riding in on this
+    flag by accident would fail this the same way an unintended always-on
+    tool fails test_lists_exactly_the_always_on_tools."""
+    off = await _tool_names(build_server(_config(allow_destructive=False)))
+    on = await _tool_names(build_server(_config(allow_destructive=True)))
+    assert on - off == _GATED_NAMES

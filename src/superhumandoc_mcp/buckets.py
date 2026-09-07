@@ -9,6 +9,8 @@ class Operation(StrEnum):
     LIST_PAGES = "listPages"
     LIST_TABLES = "listTables"
     LIST_COLUMNS = "listColumns"
+    LIST_CONTROLS = "listControls"
+    LIST_FORMULAS = "listFormulas"
     LIST_PAGE_CONTENT = "listPageContent"
     LIST_ROWS = "listRows"
     GET_ROW = "getRow"
@@ -31,6 +33,8 @@ _BUCKETS: dict[Operation, Bucket] = {
     Operation.LIST_PAGES: Bucket.READ,
     Operation.LIST_TABLES: Bucket.READ,
     Operation.LIST_COLUMNS: Bucket.READ,
+    Operation.LIST_CONTROLS: Bucket.READ,
+    Operation.LIST_FORMULAS: Bucket.READ,
     Operation.LIST_PAGE_CONTENT: Bucket.READ,
     Operation.LIST_ROWS: Bucket.READ,
     Operation.GET_ROW: Bucket.READ,

@@ -1215,6 +1215,27 @@ source has been recorded for it. Either way these are capabilities of that serve
 rather than of this REST surface, so a client built on v1 cannot reach them by
 trying harder.
 
+**`listControls` and `listFormulas` exist, and carry the parent reference the
+pre-write guard needs** [confirmed live 2026-09-07]. `GET /docs/{docId}/controls`
+and `GET /docs/{docId}/formulas` both answer 200 with the ordinary
+`{items, href}` paged envelope. This file previously recorded neither, and a
+guard was written against them on the strength of the specification alone.
+
+The reference each listed object carries under `parent` is a full
+`PageReference`, not a bare id — measured on a table, whose shape the other two
+share:
+
+```json
+{"id": "canvas-VTK4j7fF0-", "type": "page",
+ "href": "...", "browserLink": "...", "name": "test-table-01"}
+```
+
+**`name` is present alongside `id`, and that matters.** Every tool on this
+surface addresses a page as `pageIdOrName`, so a caller that names a page is
+doing the ordinary thing. A guard matching only `parent.id` would compare an id
+against a name, find nothing, and report a page as owning no objects — an
+"all clear" produced for the exact reason the guard was consulted.
+
 **Present, and easy to miss.** `DELETE /docs/{docId}/pages/{pageIdOrName}/content`
 — `deletePageContent`, *"Delete content from a page. You can delete specific
 elements by providing their IDs, or delete all content from the page."* Clearing

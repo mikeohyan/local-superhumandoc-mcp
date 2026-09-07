@@ -12,15 +12,23 @@ write would send.
 
 import pytest
 from mcp import Client
+from mcp.server.mcpserver.exceptions import ToolError
 
 from superhumandoc_mcp.api import DocsApi
 from superhumandoc_mcp.deadline import Deadline
 from superhumandoc_mcp.errors import ContentRefused
 from superhumandoc_mcp.schema_cache import ColumnCache
 from superhumandoc_mcp.server import build_server
+from superhumandoc_mcp.tools.boundary import tool_boundary
 from superhumandoc_mcp.tools.writes import (
     append_to_page,
+    clear_page_content,
     create_page,
+    delete_element,
+    delete_page,
+    delete_rows,
+    overwrite_page,
+    push_button,
     rename_page,
     replace_element,
     update_row,
@@ -28,6 +36,7 @@ from superhumandoc_mcp.tools.writes import (
 )
 from tests.conftest import (
     _CALCULATED_COLUMN,
+    _GATED_NAMES,
     _NAME_COLUMN,
     _CONTENT_WRITE_NAMES,
     _config,
@@ -402,3 +411,229 @@ async def test_an_unknown_column_in_upsert_is_refused_before_any_chunk_is_sent()
     with pytest.raises(ContentRefused):
         await upsert_rows(api, cache, "grid-x", rows, clock=clock, sleep=sleep)
     assert api.calls == []
+
+
+# --- the gated tools -----------------------------------------------------
+#
+# delete_page, clear_page_content, overwrite_page and delete_element all run
+# the pre-write guard (tools/guard.py's objects_owned_by_page) before
+# touching the page; delete_rows and push_button address a table's rows
+# directly and carry no such check. `_GatedApi` answers every method any of
+# the six calls — the three listings the guard reads, plus each tool's own
+# write and the mutation-status poll that follows it — so one fake fixture
+# serves this whole section the way `_RowApi` serves update_row/upsert_rows
+# above.
+
+
+class _GatedApi:
+    """A `DocsApi`-shaped fake for the six gated tools and the guard that
+    runs in front of four of them.
+
+    `owns` seeds what the guard's three listings — list_tables/list_controls
+    /list_formulas — return; every write is recorded by the keyword
+    arguments the tool passed and answered with a request id, and
+    `get_mutation_status` reports every one of them applied on its first
+    poll, the same shape `_RowApi` uses above.
+    """
+
+    def __init__(self, *, owns: dict[str, list[dict]] | None = None) -> None:
+        self.calls: list[dict] = []
+        self._owns = owns or {"tables": [], "controls": [], "formulas": []}
+        self._next_id = 0
+
+    def _new_request_id(self) -> str:
+        self._next_id += 1
+        return f"r-{self._next_id}"
+
+    async def list_tables(self, deadline: Deadline) -> list[dict]:
+        return self._owns["tables"]
+
+    async def list_controls(self, deadline: Deadline) -> list[dict]:
+        return self._owns["controls"]
+
+    async def list_formulas(self, deadline: Deadline) -> list[dict]:
+        return self._owns["formulas"]
+
+    async def delete_page(self, page: str, deadline: Deadline) -> dict:
+        self.calls.append({"op": "delete_page", "page": page})
+        return {"requestId": self._new_request_id()}
+
+    async def delete_page_content(
+        self, page: str, *, element_ids: list[str] | None = None, deadline: Deadline
+    ) -> dict:
+        self.calls.append(
+            {"op": "delete_page_content", "page": page, "element_ids": element_ids}
+        )
+        return {"requestId": self._new_request_id()}
+
+    async def update_page(
+        self,
+        page: str,
+        *,
+        name: str | None = None,
+        canvas: dict | None = None,
+        insertion_mode: str = "append",
+        element_id: str | None = None,
+        deadline: Deadline,
+    ) -> dict:
+        self.calls.append(
+            {
+                "op": "update_page",
+                "page": page,
+                "canvas": canvas,
+                "insertion_mode": insertion_mode,
+                "element_id": element_id,
+            }
+        )
+        return {"requestId": self._new_request_id()}
+
+    async def delete_rows(
+        self, table: str, row_ids: list[str], deadline: Deadline
+    ) -> dict:
+        self.calls.append({"op": "delete_rows", "table": table, "row_ids": row_ids})
+        return {"requestId": self._new_request_id()}
+
+    async def push_button(
+        self, table: str, row_id: str, column: str, deadline: Deadline
+    ) -> dict:
+        self.calls.append(
+            {"op": "push_button", "table": table, "row_id": row_id, "column": column}
+        )
+        return {"requestId": self._new_request_id()}
+
+    async def get_mutation_status(self, request_id: str, deadline: Deadline) -> dict:
+        return {"completed": True}
+
+
+def _api_with_hidden_table() -> _GatedApi:
+    """A table written as page content on `page-x`, invisible to
+    `outline_page` — the case the guard is there to catch."""
+    return _GatedApi(
+        owns={
+            "tables": [{"id": "grid-hidden", "parent": {"id": "page-x"}}],
+            "controls": [],
+            "formulas": [],
+        }
+    )
+
+
+async def _call(tool: str, api, page_id: str, *, force: bool = False) -> dict:
+    """Invoke one of the four page-guarded tools through `tool_boundary`,
+    the same translation `register_gated_write_tools` wraps each one in, so
+    a refusal surfaces here as the `ToolError` a model would actually see
+    rather than the bare `ContentRefused` the function itself raises."""
+    clock, _, sleep = _fixtures()
+
+    async def run() -> dict:
+        if tool == "clear_page_content":
+            return await clear_page_content(
+                api, page_id, force=force, clock=clock, sleep=sleep
+            )
+        if tool == "delete_page":
+            return await delete_page(api, page_id, force=force, clock=clock, sleep=sleep)
+        if tool == "overwrite_page":
+            return await overwrite_page(
+                api, page_id, "<p>new</p>", force=force, clock=clock, sleep=sleep
+            )
+        if tool == "delete_element":
+            return await delete_element(
+                api, page_id, "el-1", force=force, clock=clock, sleep=sleep
+            )
+        raise ValueError(f"not a page-guarded tool: {tool}")
+
+    return await tool_boundary(run)()
+
+
+@pytest.mark.parametrize(
+    "tool", ["clear_page_content", "delete_page", "overwrite_page", "delete_element"]
+)
+async def test_a_gated_page_write_refuses_and_names_what_it_found(tool):
+    """A refusal that just says 'this page has objects on it' gives a caller
+    nothing to decide with — the found object's own id must appear."""
+    with pytest.raises(ToolError) as caught:
+        await _call(tool, _api_with_hidden_table(), "page-x")
+    assert "grid-hidden" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "tool", ["clear_page_content", "delete_page", "overwrite_page", "delete_element"]
+)
+async def test_force_overrides_the_refusal(tool):
+    """`force=True` skips the guard entirely and lets the write proceed."""
+    result = await _call(tool, _api_with_hidden_table(), "page-x", force=True)
+    assert result["outcome"] == "applied"
+
+
+async def test_delete_rows_addresses_rows_by_id_never_by_name():
+    """Rows are addressed by ID for deletes exactly as they are for updates
+    — the API affects an arbitrary row by name on collision."""
+    clock, _, sleep = _fixtures()
+    api = _GatedApi()
+    await delete_rows(api, "grid-x", ["i-1", "i-2"], clock=clock, sleep=sleep)
+    assert api.calls[-1]["row_ids"] == ["i-1", "i-2"]
+
+
+async def test_delete_rows_splits_a_batch_over_the_id_cap():
+    """1200 ids over a 500-id cap is three requests: two full and a
+    remainder, the same split shape `upsert_rows` uses for its own cap."""
+    clock, _, sleep = _fixtures()
+    api = _GatedApi()
+    report = await delete_rows(
+        api, "grid-x", [f"i-{n}" for n in range(1200)], clock=clock, sleep=sleep
+    )
+    assert report["chunks"] == 3
+
+
+async def test_push_button_names_the_row_and_the_column():
+    clock, _, sleep = _fixtures()
+    api = _GatedApi()
+    await push_button(api, "grid-x", "i-1", "c-button", clock=clock, sleep=sleep)
+    call = api.calls[-1]
+    assert call["table"] == "grid-x"
+    assert call["row_id"] == "i-1"
+    assert call["column"] == "c-button"
+
+
+async def test_overwrite_page_sends_html_like_every_other_write():
+    """Force=True is enough here: it skips the guard, so this exercises the
+    real `DocsApi.update_page` body-construction the same way
+    test_a_page_write_sends_canvas_content_as_html does in tests/test_api.py,
+    without needing controls/formulas listings this fake doesn't have."""
+    clock, _, sleep = _fixtures()
+    client = _RecordingClient(_default_handler)
+    api = DocsApi(client, "doc-under-test")
+    body = await _body_sent_by(
+        client,
+        lambda: overwrite_page(
+            api, "page-x", "<p>new</p>", force=True, clock=clock, sleep=sleep
+        ),
+    )
+    assert body["contentUpdate"]["canvasContent"]["format"] == "html"
+    assert body["contentUpdate"]["insertionMode"] == "replace"
+
+
+async def test_overwrite_page_description_carries_the_read_back_warning():
+    """`test_every_write_tool_says_its_output_must_not_be_fed_back` above
+    only ever sees the always-on tools, since it builds its server with the
+    flag off — it can never reach `overwrite_page`, the one gated tool
+    `_CONTENT_WRITE_NAMES` does include. This is what actually pins that
+    tool's description against the same rule."""
+    async with Client(build_server(_config(allow_destructive=True))) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+    description = tools["overwrite_page"].description.lower()
+    assert "must not" in description
+    assert "read" in description
+
+
+async def test_the_gated_tool_descriptions_do_not_carry_the_read_back_warning():
+    """`_CONTENT_WRITE_NAMES` deliberately excludes five of the six gated
+    tools: only `overwrite_page` carries caller-composed content, so only
+    its description is required to warn against feeding a read back in.
+    Padding the other five with words that do not apply to them would make
+    the assertion in test_every_write_tool_says_its_output_must_not_be_fed_back
+    trivially true instead of meaningful."""
+    async with Client(build_server(_config(allow_destructive=True))) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+    for name in _GATED_NAMES - _CONTENT_WRITE_NAMES:
+        assert tools[name].description
+        assert "must not" not in tools[name].description.lower()

@@ -437,3 +437,37 @@ async def test_an_unkeyed_upsert_is_never_replayed():
 )
 async def test_every_other_write_is_unsafe(method, args):
     assert await _replay_used_by(method, args) is Replay.UNSAFE
+
+
+@pytest.mark.parametrize(
+    "call,expected_path",
+    [
+        (lambda api: api.list_controls(Deadline()), "/docs/doc-under-test/controls"),
+        (lambda api: api.list_formulas(Deadline()), "/docs/doc-under-test/formulas"),
+    ],
+)
+async def test_the_guard_listings_are_document_scoped_reads(call, expected_path):
+    """The two listings the pre-write guard reads, and the only two API
+    methods no tool calls directly.
+
+    Both endpoints were confirmed live on 2026-09-07 — this file had no
+    evidence they existed at all when the guard was written against them, and
+    the guard shipped calling methods that were not there. Pinning the paths
+    and the bucket here is what makes that a test failure next time rather
+    than an AttributeError the first time a destructive write is guarded.
+    """
+    seen: list[str] = []
+
+    class _PathRecorder:
+        async def request(self, method, path, **kwargs):
+            seen.append(path)
+            self.kwargs = kwargs
+            return httpx2.Response(200, json={"items": []})
+
+    recorder = _PathRecorder()
+    await call(DocsApi(recorder, "doc-under-test"))
+
+    assert seen == [expected_path]
+    assert recorder.kwargs["bucket"] is Bucket.READ
+    assert recorder.kwargs["replay"] is Replay.SAFE
+

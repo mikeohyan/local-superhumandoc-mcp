@@ -118,6 +118,30 @@ class DocsApi:
         )
         return listing.rows
 
+    async def list_controls(self, deadline: Deadline) -> list[dict]:
+        """Every control in the document, each carrying the page it sits on.
+
+        Read by the pre-write guard rather than by any tool a model calls: a
+        control written into page content is invisible to `listPageContent`,
+        so this listing is the only way to learn that a page owns one before
+        a destructive write removes it.
+        """
+        listing = await self._paged(
+            f"/docs/{self._doc_id}/controls", Operation.LIST_CONTROLS, deadline
+        )
+        return listing.rows
+
+    async def list_formulas(self, deadline: Deadline) -> list[dict]:
+        """Every named formula in the document, each carrying its page.
+
+        The third of the guard's three listings, and invisible to
+        `listPageContent` for the same reason `list_controls` is.
+        """
+        listing = await self._paged(
+            f"/docs/{self._doc_id}/formulas", Operation.LIST_FORMULAS, deadline
+        )
+        return listing.rows
+
     async def list_page_content(self, page: str, deadline: Deadline) -> list[dict]:
         listing = await self._paged(
             f"/docs/{self._doc_id}/pages/{page}/content",
