@@ -7,7 +7,7 @@ import httpx2
 import pytest
 
 from superhumandoc_mcp.api import DocsApi
-from superhumandoc_mcp.buckets import Operation
+from superhumandoc_mcp.buckets import Operation, bucket_for
 from superhumandoc_mcp.client import DocsClient
 from superhumandoc_mcp.config import Config
 from superhumandoc_mcp.deadline import Deadline
@@ -241,3 +241,199 @@ async def test_a_non_504_refusal_is_not_laddered():
         await _always_400(sizes).list_rows("grid-x", Deadline(), limit=200)
     assert len(sizes) == 1
     assert caught.value.status == 400
+
+
+# --- Helpers for the write calls (Tasks 13 and 16) -------------------------
+#
+# None of these belong in tests/conftest.py: the write wave's shared-fixtures
+# section is explicit that a recording client which "captures what was sent"
+# belongs to the one task that needs it, not to the shared module. Each is a
+# few lines over one pattern — a small double that records what `request()`
+# was called with and hands back a response nobody but the recorder reads.
+
+
+def _recording_client(seen: list[str]):
+    """A double that records only the *path* each request targets. Used for
+    `get_mutation_status` alone: it is the one method whose path must not
+    carry the doc id, and this is cheaper than reusing `_RecordingClient`
+    just to reach into `calls[0]["path"] `via keyword args."""
+
+    class _PathRecorder:
+        async def request(self, method, path, **kwargs):
+            seen.append(path)
+            return httpx2.Response(200, json={"completed": True})
+
+    return _PathRecorder()
+
+
+async def _body_sent_by(call) -> dict:
+    """Run `call` (a coroutine function taking a `DocsApi`) against a client
+    that records what it was asked to send, and return that payload — never
+    a response, which the recorder fabricates and nothing here reads."""
+    client = _RecordingClient()
+    api = DocsApi(client, "doc-under-test")
+    await call(api)
+    return client.calls[0]["json"]
+
+
+async def _bucket_of(call) -> Bucket:
+    client = _RecordingClient()
+    api = DocsApi(client, "doc-under-test")
+    await call(api)
+    return client.calls[0]["bucket"]
+
+
+async def _replay_used_by(method: str, args: tuple, **kwargs) -> Replay:
+    """Call `method` on a fresh `DocsApi` with `args` and `kwargs`, and
+    return the `Replay` it declared to the client. Generic over every write
+    method so Task 16's parametrized test needs no per-method plumbing."""
+    client = _RecordingClient()
+    api = DocsApi(client, "doc-under-test")
+    await getattr(api, method)(*args, deadline=Deadline(), **kwargs)
+    return client.calls[0]["replay"]
+
+
+async def _replay_used(key_columns: list[str] | None) -> Replay:
+    return await _replay_used_by(
+        "upsert_rows", ("grid-x", [{"c-name": "x"}]), key_columns=key_columns
+    )
+
+
+_WRITE_CALLS = [
+    (lambda api: api.create_page("X", deadline=Deadline()), Operation.CREATE_PAGE),
+    (lambda api: api.update_page("page-x", deadline=Deadline()), Operation.UPDATE_PAGE),
+    (lambda api: api.delete_page("page-x", Deadline()), Operation.DELETE_PAGE),
+    (
+        lambda api: api.delete_page_content("page-x", deadline=Deadline()),
+        Operation.DELETE_PAGE_CONTENT,
+    ),
+    (
+        lambda api: api.upsert_rows(
+            "grid-x", [{"c-name": "x"}], key_columns=["c-name"], deadline=Deadline()
+        ),
+        Operation.UPSERT_ROWS,
+    ),
+    (
+        lambda api: api.update_row("grid-x", "i-1", {"c-name": "x"}, Deadline()),
+        Operation.UPDATE_ROW,
+    ),
+    (lambda api: api.delete_rows("grid-x", ["i-1"], Deadline()), Operation.DELETE_ROWS),
+    (
+        lambda api: api.push_button("grid-x", "i-1", "c-go", Deadline()),
+        Operation.PUSH_BUTTON,
+    ),
+]
+
+
+# --- Task 13: typed write calls against the API -----------------------------
+
+
+async def test_the_mutation_status_path_is_not_doc_scoped():
+    """Every other method interpolates a doc id. This one must not — a public
+    client got this wrong and polled a path that does not exist."""
+    seen: list[str] = []
+    api = DocsApi(_recording_client(seen), "doc-under-test")
+    await api.get_mutation_status("req-1", Deadline())
+    assert seen[-1].endswith("/mutationStatus/req-1")
+    assert "doc-under-test" not in seen[-1]
+
+
+async def test_a_status_poll_declares_itself_replay_safe():
+    """An idempotent GET. Re-reading a status never replays what it watches."""
+    assert await _replay_used_by("get_mutation_status", ("r",)) is Replay.SAFE
+
+
+async def test_a_page_write_sends_canvas_content_as_html():
+    """`canvasContent.format` is `html` on every page-content write per the
+    write wave's Global Constraints. The pinned `coda-openapi.yaml` nests
+    `canvasContent` inside `contentUpdate` on `PageUpdate` — the plan's own
+    sketch checked a flat `body["canvasContent"]`, which does not match the
+    spec `PageContentUpdate` requires, so the assertion below follows the
+    spec instead."""
+    body = await _body_sent_by(
+        lambda api: api.update_page(
+            "page-x",
+            canvas={"format": "html", "content": "<p>hi</p>"},
+            deadline=Deadline(),
+        )
+    )
+    assert body["contentUpdate"]["canvasContent"]["format"] == "html"
+
+
+async def test_a_page_write_is_additive_unless_told_otherwise():
+    """`append` is the only mode that cannot destroy existing content, so it
+    is the default. A method that defaulted to `replace` would turn every
+    caller that forgot the argument into a whole-page wipe."""
+    body = await _body_sent_by(
+        lambda api: api.update_page(
+            "page-x",
+            canvas={"format": "html", "content": "<p>hi</p>"},
+            deadline=Deadline(),
+        )
+    )
+    assert body["contentUpdate"]["insertionMode"] == "append"
+    assert "elementId" not in body["contentUpdate"]
+
+
+async def test_an_element_scoped_replace_names_the_element_it_replaces():
+    """Measured 2026-09-07: with `elementId` set, only the named element
+    changes. Without it, `replace` rewrites the whole page — the API tells
+    the two apart by the field's absence, not by a flag, so sending a null
+    or an empty string would be a whole-page wipe wearing a narrower name."""
+    body = await _body_sent_by(
+        lambda api: api.update_page(
+            "page-x",
+            canvas={"format": "html", "content": "<p>new</p>"},
+            insertion_mode="replace",
+            element_id="cl-GQI0miY3Cs",
+            deadline=Deadline(),
+        )
+    )
+    assert body["contentUpdate"]["insertionMode"] == "replace"
+    assert body["contentUpdate"]["elementId"] == "cl-GQI0miY3Cs"
+
+
+async def test_every_write_is_charged_to_its_mapped_bucket():
+    for call, operation in _WRITE_CALLS:
+        assert await _bucket_of(call) is bucket_for(operation)
+
+
+async def test_a_write_returns_the_parsed_body_not_the_response():
+    """A 202 carries the requestId the poll loop needs."""
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(202, json={"id": "page-x", "requestId": "req-1"})
+
+    api = _api(handler)
+    body = await api.delete_page("page-x", Deadline())
+    assert body["requestId"] == "req-1"
+
+
+# --- Task 16: replay eligibility travels with the call ----------------------
+
+
+async def test_a_keyed_upsert_is_replay_safe():
+    """With key_columns the operation is idempotent, so a timeout after
+    transmission can be retried without duplicating rows."""
+    assert await _replay_used(key_columns=["Name"]) is Replay.SAFE
+
+
+async def test_an_unkeyed_upsert_is_never_replayed():
+    """There are no idempotency keys. Replaying this duplicates rows."""
+    assert await _replay_used(key_columns=None) is Replay.UNSAFE
+
+
+@pytest.mark.parametrize(
+    "method,args",
+    [
+        ("create_page", ("X",)),
+        ("update_page", ("page-x",)),
+        ("delete_page", ("page-x",)),
+        ("delete_page_content", ("page-x",)),
+        ("update_row", ("grid-x", "i-1", {"c-name": "x"})),
+        ("delete_rows", ("grid-x", ["i-1"])),
+        ("push_button", ("grid-x", "i-1", "c-go")),
+    ],
+)
+async def test_every_other_write_is_unsafe(method, args):
+    assert await _replay_used_by(method, args) is Replay.UNSAFE

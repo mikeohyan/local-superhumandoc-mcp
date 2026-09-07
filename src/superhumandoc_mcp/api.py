@@ -201,3 +201,233 @@ class DocsApi:
             replay=Replay.SAFE,
         )
         return response.json()
+
+    # --- Writes --------------------------------------------------------
+    #
+    # One method per mutating operation, following `get_row`'s shape: a
+    # single `self._client.request(...)` naming its operation and bucket,
+    # and returning `response.json()` — a 202 body carrying the `requestId`
+    # the mutation poll loop needs, not the raw response. Every write
+    # declares its own `Replay` explicitly rather than relying on the
+    # client's default, so the choice is visible at each call site: only
+    # GETs and a keyed `upsert_rows` may be replayed after transmission,
+    # because this API has no idempotency keys and replaying anything else
+    # risks duplicating a change. See the `failure-policy` topic.
+    #
+    # `rows`/`cells` here are plain `{column_id: value}` mappings — the
+    # shape every other write-wave task builds and consumes — translated
+    # here into the API's `RowEdit.cells` list of `{column, value}` pairs,
+    # which is the only place that translation needs to happen.
+
+    async def create_page(
+        self,
+        name: str,
+        *,
+        subtitle: str | None = None,
+        parent_page_id: str | None = None,
+        canvas: dict | None = None,
+        deadline: Deadline,
+    ) -> dict:
+        """`canvas`, when given, is a `{format, content}` pair — `format` is
+        always `html`, per the `tool-surface` topic — and becomes the new
+        page's initial canvas content."""
+        body: dict[str, object] = {"name": name}
+        if subtitle is not None:
+            body["subtitle"] = subtitle
+        if parent_page_id is not None:
+            body["parentPageId"] = parent_page_id
+        if canvas is not None:
+            body["pageContent"] = {"type": "canvas", "canvasContent": canvas}
+        response = await self._client.request(
+            "POST",
+            f"/docs/{self._doc_id}/pages",
+            operation=Operation.CREATE_PAGE.value,
+            bucket=bucket_for(Operation.CREATE_PAGE),
+            deadline=deadline,
+            replay=Replay.UNSAFE,
+            json=body,
+        )
+        return response.json()
+
+    async def update_page(
+        self,
+        page: str,
+        *,
+        name: str | None = None,
+        canvas: dict | None = None,
+        insertion_mode: str = "append",
+        element_id: str | None = None,
+        deadline: Deadline,
+    ) -> dict:
+        """`canvas`, when given, is a `{format, content}` pair carrying the
+        new content. The API nests it as `contentUpdate.canvasContent`, not
+        at the top level, so it is wrapped here rather than left to callers
+        to get right.
+
+        `insertion_mode` defaults to `append`, which is the only additive
+        mode and therefore the only safe default. `replace` with no
+        `element_id` rewrites the whole page, and the three page-write tools
+        differ from each other in exactly these two arguments — so they are
+        parameters rather than something a later caller bolts on.
+
+        `element_id` narrows a `replace` to the single named element.
+        Measured on 2026-09-07: the named element alone changes, and every
+        element ID on the page survives the write, so an ID read earlier in
+        the same tool call is still valid afterwards. The failure that
+        measurement ruled out was the dangerous one — a field accepted and
+        silently ignored would turn an intended one-line edit into a
+        whole-page wipe. It is sent only when given, because the API
+        distinguishes "this element" from "the entire page" by the field's
+        absence rather than by a separate flag.
+        """
+        body: dict[str, object] = {}
+        if name is not None:
+            body["name"] = name
+        if canvas is not None:
+            content_update: dict[str, object] = {
+                "insertionMode": insertion_mode,
+                "canvasContent": canvas,
+            }
+            if element_id is not None:
+                content_update["elementId"] = element_id
+            body["contentUpdate"] = content_update
+        response = await self._client.request(
+            "PUT",
+            f"/docs/{self._doc_id}/pages/{page}",
+            operation=Operation.UPDATE_PAGE.value,
+            bucket=bucket_for(Operation.UPDATE_PAGE),
+            deadline=deadline,
+            replay=Replay.UNSAFE,
+            json=body,
+        )
+        return response.json()
+
+    async def delete_page(self, page: str, deadline: Deadline) -> dict:
+        response = await self._client.request(
+            "DELETE",
+            f"/docs/{self._doc_id}/pages/{page}",
+            operation=Operation.DELETE_PAGE.value,
+            bucket=bucket_for(Operation.DELETE_PAGE),
+            deadline=deadline,
+            replay=Replay.UNSAFE,
+        )
+        return response.json()
+
+    async def delete_page_content(
+        self,
+        page: str,
+        *,
+        element_ids: list[str] | None = None,
+        deadline: Deadline,
+    ) -> dict:
+        """Omitting `element_ids` (or passing an empty list) deletes every
+        element on the page — the API distinguishes "all content" from
+        "these elements" by absence, not by a separate flag."""
+        body: dict[str, object] = {}
+        if element_ids is not None:
+            body["elementIds"] = element_ids
+        response = await self._client.request(
+            "DELETE",
+            f"/docs/{self._doc_id}/pages/{page}/content",
+            operation=Operation.DELETE_PAGE_CONTENT.value,
+            bucket=bucket_for(Operation.DELETE_PAGE_CONTENT),
+            deadline=deadline,
+            replay=Replay.UNSAFE,
+            json=body,
+        )
+        return response.json()
+
+    async def upsert_rows(
+        self,
+        table: str,
+        rows: list[dict],
+        *,
+        key_columns: list[str] | None,
+        deadline: Deadline,
+    ) -> dict:
+        """Replay eligibility travels with the call: with `key_columns` set
+        the upsert is idempotent and safe to replay after a timeout;
+        without them there are no idempotency keys, and replaying would
+        duplicate rows. `key_columns` is required (not defaulted) so every
+        caller states that choice rather than inheriting it silently."""
+        body: dict[str, object] = {
+            "rows": [
+                {"cells": [{"column": column, "value": value} for column, value in row.items()]}
+                for row in rows
+            ]
+        }
+        if key_columns:
+            body["keyColumns"] = key_columns
+        response = await self._client.request(
+            "POST",
+            f"/docs/{self._doc_id}/tables/{table}/rows",
+            operation=Operation.UPSERT_ROWS.value,
+            bucket=bucket_for(Operation.UPSERT_ROWS),
+            deadline=deadline,
+            replay=Replay.SAFE if key_columns else Replay.UNSAFE,
+            json=body,
+        )
+        return response.json()
+
+    async def update_row(
+        self, table: str, row_id: str, cells: dict, deadline: Deadline
+    ) -> dict:
+        body = {
+            "row": {
+                "cells": [
+                    {"column": column, "value": value} for column, value in cells.items()
+                ]
+            }
+        }
+        response = await self._client.request(
+            "PUT",
+            f"/docs/{self._doc_id}/tables/{table}/rows/{row_id}",
+            operation=Operation.UPDATE_ROW.value,
+            bucket=bucket_for(Operation.UPDATE_ROW),
+            deadline=deadline,
+            replay=Replay.UNSAFE,
+            json=body,
+        )
+        return response.json()
+
+    async def delete_rows(
+        self, table: str, row_ids: list[str], deadline: Deadline
+    ) -> dict:
+        response = await self._client.request(
+            "DELETE",
+            f"/docs/{self._doc_id}/tables/{table}/rows",
+            operation=Operation.DELETE_ROWS.value,
+            bucket=bucket_for(Operation.DELETE_ROWS),
+            deadline=deadline,
+            replay=Replay.UNSAFE,
+            json={"rowIds": row_ids},
+        )
+        return response.json()
+
+    async def push_button(
+        self, table: str, row_id: str, column: str, deadline: Deadline
+    ) -> dict:
+        response = await self._client.request(
+            "POST",
+            f"/docs/{self._doc_id}/tables/{table}/rows/{row_id}/buttons/{column}",
+            operation=Operation.PUSH_BUTTON.value,
+            bucket=bucket_for(Operation.PUSH_BUTTON),
+            deadline=deadline,
+            replay=Replay.UNSAFE,
+        )
+        return response.json()
+
+    async def get_mutation_status(self, request_id: str, deadline: Deadline) -> dict:
+        """The one method whose path is not doc-scoped: `/mutationStatus`
+        lives at the API root, not under `/docs/{docId}/`. Declares
+        `Replay.SAFE` — it is an idempotent GET, and re-reading a status
+        never replays the operation being watched."""
+        response = await self._client.request(
+            "GET",
+            f"/mutationStatus/{request_id}",
+            operation=Operation.GET_MUTATION_STATUS.value,
+            bucket=bucket_for(Operation.GET_MUTATION_STATUS),
+            deadline=deadline,
+            replay=Replay.SAFE,
+        )
+        return response.json()
