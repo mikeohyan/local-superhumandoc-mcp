@@ -108,3 +108,18 @@ class ContentRefused(ClientError):
     one type rather than two, because both are the same refusal — the caller
     supplied something a write cannot carry.
     """
+
+
+class DownloadUnusable(ClientError):
+    """A response from the download host that is not usable page content.
+
+    Raised by the tokenless download hop, never by `DocsClient`: the download
+    host is not the API, so none of the classes above — which are about a
+    request to the API succeeding, failing, or leaving its outcome unknown —
+    describe what went wrong here. The message says which of the two reasons
+    applied, because "download failed" gives a caller nothing to act on.
+    """
+
+    def __init__(self, url: str, reason: str) -> None:
+        super().__init__(f"{url}: {reason}")
+        self.reason = reason
