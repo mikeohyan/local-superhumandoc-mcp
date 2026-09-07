@@ -62,6 +62,10 @@ async def outline_page(api: DocsApi, page_id_or_name: str) -> list[dict]:
     Probe P9: `style` and `lineLevel` are nested inside each item's
     `itemContent`, not at the item's top level. Reading them flat yields
     silent `None`s that look like valid data, so they are read from there.
+
+    The line's text is `itemContent.content`, not `itemContent.text` — there
+    is no `text` key anywhere in the item. The outward key stays `text`
+    because that is the word a model reads; only the source moves.
     """
     items = await api.list_page_content(page_id_or_name, Deadline())
     lines = []
@@ -72,7 +76,7 @@ async def outline_page(api: DocsApi, page_id_or_name: str) -> list[dict]:
                 "element_id": item.get("id"),
                 "style": content.get("style"),
                 "level": content.get("lineLevel"),
-                "text": content.get("text", ""),
+                "text": content.get("content", ""),
             }
         )
     return lines

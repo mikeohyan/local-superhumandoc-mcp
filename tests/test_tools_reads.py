@@ -40,7 +40,7 @@ async def test_outline_returns_lines_in_order_with_their_element_ids():
                 "itemContent": {
                     "style": "heading1",
                     "lineLevel": 0,
-                    "text": "Title",
+                    "content": "Title",
                 },
             },
             {
@@ -48,7 +48,7 @@ async def test_outline_returns_lines_in_order_with_their_element_ids():
                 "itemContent": {
                     "style": "paragraph",
                     "lineLevel": 0,
-                    "text": "Body",
+                    "content": "Body",
                 },
             },
         ]
@@ -69,13 +69,39 @@ async def test_style_and_level_are_read_from_item_content_not_the_top_level():
             {
                 "id": "el-1",
                 "style": "WRONG",
-                "itemContent": {"style": "paragraph", "lineLevel": 2, "text": "x"},
+                "itemContent": {"style": "paragraph", "lineLevel": 2, "content": "x"},
             }
         ]
     )
     lines = await outline_page(api, "page-x")
     assert lines[0]["style"] == "paragraph"
     assert lines[0]["level"] == 2
+
+
+async def test_a_line_reads_its_text_from_content_and_there_is_no_text_key():
+    """The item shape observed live carries the line's text under
+    `itemContent.content`; no `itemContent.text` key exists at all. Reading
+    the wrong one is silent — every line comes back with an empty string,
+    which is a plausible value for a blank line — so the item here is a
+    verbatim copy of one the API actually returned, with a decoy `text`
+    alongside it to pin which key wins."""
+    api = _FakeApi(
+        [
+            {
+                "id": "cl-RVeKFUvHVD",
+                "type": "line",
+                "itemContent": {
+                    "style": "paragraph",
+                    "format": "plainText",
+                    "content": "ALPHA one",
+                    "text": "WRONG",
+                    "lineLevel": 0,
+                },
+            }
+        ]
+    )
+    lines = await outline_page(api, "page-x")
+    assert lines[0]["text"] == "ALPHA one"
 
 
 async def test_outline_page_asks_for_the_page_it_was_given():
