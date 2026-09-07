@@ -29,7 +29,7 @@ decision may not yet be accepted.
 | `evidence-location` | 0003 | Implemented | `_rfc/archive/implemented/0003-evidence-and-reference-material.md` |
 | `failure-policy` | 0010 | Implemented | `_rfc/archive/implemented/0010-failure-classification-and-retry-policy.md` |
 | `packaging` | 0007 | Implemented | `_rfc/archive/implemented/0007-packaging-and-distribution.md` |
-| `request-sizing` | 0014 | Accepted | `_rfc/0014-measure-the-row-instead-of-estimating-it.md` |
+| `request-sizing` | 0014 | Implemented | `_rfc/archive/implemented/0014-measure-the-row-instead-of-estimating-it.md` |
 | `rfc-process` | 0001 | Implemented | `_rfc/archive/implemented/0001-rfc-process.md` |
 | `server-ownership` | 0004 | Implemented | `_rfc/archive/implemented/0004-build-local-doc-scoped-server.md` |
 | `tool-surface` | 0013 | Accepted | `_rfc/0013-html-content-and-the-read-write-cycle.md` |
@@ -39,6 +39,11 @@ decision may not yet be accepted.
 fallbacks: shipped code written against them is described by their
 replacements, which carry those parts forward deliberately.
 
+`tool-surface` is Accepted rather than Implemented on purpose. Seventeen of the
+eighteen tools it enumerates shipped on 2026-09-07; `read_page` did not, because
+it runs the export flow that `async-operations` owns and that flow is unbuilt.
+The status says so rather than rounding up.
+
 ## In flight — `_rfc/`
 
 Proposed and Accepted: decided or awaiting decision, not yet shipped.
@@ -47,7 +52,6 @@ Proposed and Accepted: decided or awaiting decision, not yet shipped.
 |---|---|---|---|---|---|
 | 0012 | Poll asynchronous operations on one bounded loop, and give export its own budget | `async-operations` | Accepted | 2026-09-06 | `_rfc/0012-async-operation-polling-and-export-budget.md` |
 | 0013 | Write page content as HTML, and never send a read back as a write | `tool-surface` | Accepted | 2026-09-06 | `_rfc/0013-html-content-and-the-read-write-cycle.md` |
-| 0014 | Measure a row in the units the API counts, and report what a deadline left undone | `request-sizing` | Accepted | 2026-09-06 | `_rfc/0014-measure-the-row-instead-of-estimating-it.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
@@ -64,6 +68,7 @@ works today.
 | 0008 | Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory | `upstream-api` | Implemented | 2026-09-04 | `_rfc/archive/implemented/0008-api-version-lock-and-advisory-rate-limits.md` |
 | 0009 | Reference decisions by topic and code by symbol, never by number or line | `doc-conventions` | Implemented | 2026-09-03 | `_rfc/archive/implemented/0009-documentation-reference-conventions.md` |
 | 0010 | Classify transport failures by whether the request was transmitted, and bound every retry by one deadline | `failure-policy` | Implemented | 2026-09-04 | `_rfc/archive/implemented/0010-failure-classification-and-retry-policy.md` |
+| 0014 | Measure a row in the units the API counts, and report what a deadline left undone | `request-sizing` | Implemented | 2026-09-06 | `_rfc/archive/implemented/0014-measure-the-row-instead-of-estimating-it.md` |
 
 ## Retired — `_rfc/archive/retired/`
 

@@ -7,7 +7,7 @@ decided: 2026-09-06
 supersedes: 0005
 superseded_by:
 topic: tool-surface
-commits: []
+commits: [b6bfc45, 1f157af, 285ca88, 79b24bb, 2208614]
 tags: [tools, fidelity, write-safety]
 ---
 
@@ -280,3 +280,51 @@ that a person notices immediately, so a fidelity failure here is visible in a
 way a throttling bug is not.
 
 ## Implementation notes
+
+**Status remains Accepted, deliberately.** Seventeen of the eighteen tools this
+RFC enumerates shipped on 2026-09-07 — eleven always-on and all six gated.
+`read_page` is the one that did not, and it is the reason this RFC has not
+reached Implemented: marking it so would put a false record in `_rfc/`.
+
+`read_page` was never blocked on anything this RFC decides. It runs the export,
+which the `async-operations` topic owns, and that topic's export half was
+unbuilt when this wave ran. Probe E1 on 2026-09-07 has since measured an export
+end to end at 2.9 to 6.6 seconds, which settles the question that mattered:
+a page read fits inside one tool call, so the tool is buildable as specified
+and this RFC does not need superseding on that account. The remaining work is
+the export subsystem itself.
+
+**What shipped, and what changed on the way.** Page content is written as HTML
+in every path. The rule that a read is never a write source is carried by the
+tool descriptions, since `content` is a free string and no code can tell where
+a caller got it; a test requires the seven content-carrying tools to state it.
+That test originally iterated all twelve write tools, including five that carry
+no caller-composed content at all — it was narrowed, because requiring
+`delete_rows` or `push_button` to warn against feeding a read back buys a
+passing assertion and no guarantee.
+
+`replace_element` exists because probe B6 confirmed the mechanism on
+2026-09-07: a `replace` carrying an `elementId` changed only the named element,
+and every element ID on the page survived the write. The measurement ruled out
+the dangerous outcome — a field accepted and silently ignored would have turned
+an intended one-line edit into a whole-page wipe.
+
+**The pre-write guard shipped with two defects, both closed before release.**
+It called `list_controls` and `list_formulas`, which did not exist on the API
+client — an `AttributeError` the first time a destructive write was guarded,
+which is to say the first time it mattered. And it matched only `parent.id`
+while every tool here takes a page id *or name*, so a model naming a page would
+have received an empty result and a write straight through onto a page holding
+a table. Both endpoints are now confirmed live, and the parent reference is
+matched on either field.
+
+**A defect in this frozen body, recorded rather than fixed.** The Decision says
+*"Seventeen tools. Eleven are always on"* while its own enumeration lists
+eighteen and twelve. The enumeration is what was built. The body cannot be
+corrected without superseding, so this is the note a future reader needs; the
+correction belongs to whichever RFC finally lands `read_page`.
+
+**Not delegated, and worth knowing.** This RFC states the eight-table overview
+threshold in its own body without delegating it to the constants file, so
+`OVERVIEW_INLINE_COLUMNS_MAX_TABLES` moves only by superseding — unlike every
+other tunable in that file. The constants file says so at that row.

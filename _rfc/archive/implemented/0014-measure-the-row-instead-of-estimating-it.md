@@ -1,13 +1,13 @@
 ---
 rfc: 0014
 title: Measure a row in the units the API counts, and report what a deadline left undone
-status: Accepted
+status: Implemented
 created: 2026-09-06
 decided: 2026-09-06
 supersedes: 0011
 superseded_by:
 topic: request-sizing
-commits: []
+commits: [6d031b8, a22d6e6, bb29885, 1f157af, 285ca88]
 tags: [sizing, batching, deadlines]
 ---
 
@@ -207,3 +207,46 @@ than a single result, and the *not attempted* state in particular has no
 analogue in most APIs a model will have seen.
 
 ## Implementation notes
+
+Shipped 2026-09-07 across five commits, in `sizing.py`, `outcomes.py`,
+`chunking.py` and the two row-write tools in `tools/writes.py`.
+
+**The measurement went in unchanged.** `row_internal_bytes` is
+`utf8_len(value) + newline_count` summed over a row's values, and
+`MAX_ROW_INTERNAL_BYTES` is 84,000 internal bytes. `ROW_INFLATION_FACTOR` is
+gone from the constants file rather than merely unused.
+
+**The second axis needed a correction the decision did not anticipate.**
+`request_wire_bytes` was first written as `json.dumps(payload,
+ensure_ascii=False)` with a docstring claiming non-ASCII inflates to `\uXXXX`
+escapes — a claim that contradicts the very argument it was passing. It now
+serialises exactly as `httpx2._content.encode_json` does, compact separators
+included, because a measure that disagrees with the encoder is guessing at the
+number the cap is expressed in. Default separators charge two bytes per field
+that are never sent, which on a batch of many small cells is a real over-count.
+
+**The suffix guarantee holds, and one defect nearly cost it.** `BatchReport`
+initially left unmarked rows out of its outcome map, so `resume_from` answered
+`None` while `as_dict` reported those same rows as not attempted — a caller
+trusting `resume_from` would have dropped them. Reachable exactly when a
+chunker returns early, which is the case resuming exists for. Every row now
+starts `NOT_ATTEMPTED`, and a test marks fewer rows than it opens.
+
+**The halving trigger shipped too broad and was narrowed.** `send_chunks`
+halved on any `UpstreamRefused`. This RFC is specific — a size refusal is a 400
+whose message says `exceeds maximum size` or `entity too large`, that text
+being the only discriminator, since the body carries no `codaType` and no
+`codaDetail`. Halving a 403 or a bad table name would have asked the same
+question up to seven more times per batch. The test fake had raised an invented
+paraphrase, close enough to read right and wrong enough not to exercise the
+branch; it now raises the recorded message verbatim.
+
+**`CHUNK_COST_ESTIMATE_S` as an admission gate rather than a bound is pinned by
+a test**, because the obvious reading of an estimate is that it bounds the cost.
+A chunk admitted on a thirty-second estimate may poll for sixty.
+
+**Not carried out here:** `delete_rows` chunks row IDs against
+`MAX_ROW_IDS_PER_DELETE`, which lives beside that tool rather than in
+`sizing.py`, on the same reasoning that keeps `MAX_ROWS_PER_UPSERT` beside
+`upsert_rows` — both are properties of one operation, not of the shared
+measurement.
