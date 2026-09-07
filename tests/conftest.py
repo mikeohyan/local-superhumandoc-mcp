@@ -49,7 +49,13 @@ def _fixtures():
 
 
 def _rows(n: int) -> list[dict]:
-    """`n` distinct small rows, each identifiable by its index."""
+    """`n` distinct small rows, each identifiable by its index.
+
+    Keyed by column ID (`"c-name"`), not by column name (`"Name"`, as
+    `_NAME_COLUMN["name"]` has it) -- combining these rows with `_NAME_COLUMN`
+    in the same bulk write raises `ContentRefused` rather than the mismatch
+    you were expecting. This has cost time more than once.
+    """
     return [{"c-name": f"row-{i}"} for i in range(n)]
 
 
@@ -91,16 +97,6 @@ _GATED_NAMES = {
     "overwrite_page",
     "delete_element",
 }
-_WRITE_TOOL_NAMES = {
-    "create_page",
-    "append_to_page",
-    "replace_element",
-    "rename_page",
-    "upsert_rows",
-    "update_row",
-} | _GATED_NAMES
-
-
 # The write tools that carry something the caller composed — page content, a
 # page name, or cell values. These are the ones the rule "a read is never a
 # write source" can actually be stated for, and the only ones whose
@@ -194,4 +190,27 @@ def _downloader_failing_on(url: str, *, then: str) -> _Downloads:
 
 def _always_failing_downloader() -> _Downloads:
     return _Downloads(dead_all=True)
+
+
+class _RecordingDownloads(_Downloads):
+    """`_Downloads`, plus a record of every URL it was asked to fetch.
+
+    Still answers *any* URL with `default` -- it does not narrow what the
+    double accepts, only what a test can observe afterward. This is what lets
+    a test assert that the URL handed to `downloader.fetch` was the one the
+    poll body actually returned, not merely some URL: a fake shaped to answer
+    every URL alike can otherwise agree with code that fetches the wrong one.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.urls: list[str] = []
+
+    async def fetch(self, url: str, deadline) -> str:
+        self.urls.append(url)
+        return await super().fetch(url, deadline)
+
+
+def _url_recording_downloader(body: str) -> _RecordingDownloads:
+    return _RecordingDownloads(default=body)
 

@@ -1,7 +1,7 @@
 import pytest
 
 from superhumandoc_mcp.deadline import Deadline
-from superhumandoc_mcp.errors import ClientError, UpstreamRefused
+from superhumandoc_mcp.errors import ClientError, RateLimited, UpstreamRefused
 from superhumandoc_mcp.export import (
     EXPORT_404_GRACE_S,
     EXPORT_DEADLINE_S,
@@ -15,6 +15,7 @@ from tests.conftest import (
     _downloader_failing_on,
     _fixed_downloader,
     _fixtures,
+    _url_recording_downloader,
 )
 
 
@@ -41,12 +42,17 @@ class _ExportApi:
 
 
 async def test_a_link_is_followed_once_the_export_completes():
+    """Not just that a body comes back, but that it was fetched from the link
+    the poll body actually returned -- a downloader shaped to answer every URL
+    alike would otherwise agree with code that fetched a different one."""
     clock, _, sleep = _fixtures()
     api = _ExportApi([{}, {"downloadLink": "https://s3/x"}])
-    body = await export_page(api, _fixed_downloader("# Page"), "page-x",
+    downloader = _url_recording_downloader("# Page")
+    body = await export_page(api, downloader, "page-x",
                              "markdown", Deadline(clock=clock),
                              clock=clock, sleep=sleep)
     assert body == "# Page"
+    assert downloader.urls == ["https://s3/x"]
 
 
 async def test_the_kickoff_id_is_what_gets_polled():
@@ -76,7 +82,10 @@ async def test_a_kickoff_without_an_id_fails_at_once_and_says_so():
     with pytest.raises(ClientError) as caught:
         await export_page(api, _fixed_downloader("x"), "page-x", "markdown",
                           Deadline(clock=clock), clock=clock, sleep=sleep)
-    assert "id" in str(caught.value)
+    # Not just "id" -- that substring also turns up inside "did" in the
+    # fallback "did not complete within the export deadline" message, so it
+    # would pass even if this branch fell through to the wrong one.
+    assert "did not return an id" in str(caught.value)
     assert clock() < EXPORT_404_GRACE_S
 
 
@@ -89,7 +98,11 @@ async def test_a_410_is_terminal_at_once_and_never_waits_out_the_grace():
     with pytest.raises(ClientError):
         await export_page(api, _fixed_downloader("x"), "page-x", "markdown",
                           Deadline(clock=clock), clock=clock, sleep=sleep)
-    assert sum(slept) < EXPORT_404_GRACE_S
+    # Equality, not a loose bound under the grace window: `< EXPORT_404_GRACE_S`
+    # (20.0) passes with tenfold slack over the one sleep that actually
+    # happens (the opening 2.0s wait), so it would not catch a 410 mistakenly
+    # spending part of the grace window before giving up.
+    assert sum(slept) == EXPORT_INITIAL_SLEEP_S
 
 
 async def test_a_404_inside_the_grace_window_is_not_yet():
@@ -101,6 +114,22 @@ async def test_a_404_inside_the_grace_window_is_not_yet():
     body = await export_page(api, _fixed_downloader("ok"), "page-x", "markdown",
                              Deadline(clock=clock), clock=clock, sleep=sleep)
     assert body == "ok"
+
+
+async def test_a_non_404_client_error_from_status_is_wrapped_with_page_context():
+    """`get_export_status` can also fail with `RateLimited`, `StickyRateLimit`,
+    `ThrottleRefused`, `ResponseUnusable` or `OutcomeUnknown` -- all reachable
+    from the real client, and none of them `UpstreamRefused`. Those go through
+    the general `except ClientError` arm, one branch below the 404/410
+    handling, which is what gives them the "could not be completed" page
+    context. `RateLimited`'s own message says nothing about being unable to
+    complete, so this only passes if that wrapping actually happened."""
+    clock, _, sleep = _fixtures()
+    api = _ExportApi([RateLimited("getPageContentExportStatus")])
+    with pytest.raises(ClientError) as caught:
+        await export_page(api, _fixed_downloader("x"), "page-x", "markdown",
+                          Deadline(clock=clock), clock=clock, sleep=sleep)
+    assert "the export for page 'page-x' could not be completed" in str(caught.value)
 
 
 async def test_an_error_field_is_terminal_and_carries_its_own_text():
@@ -195,15 +224,43 @@ async def test_the_interval_backs_off_and_caps():
 
 
 async def test_the_export_ceiling_never_extends_the_tool_deadline():
-    """`clamp` takes the lesser. A twenty-second deadline governs even though
-    the export ceiling is forty-five."""
+    """`clamp` takes the lesser: with a tight tool deadline the ceiling is set
+    by what the deadline has left, not by the export's own forty-five-second
+    allowance.
+
+    A deadline with only 1.0s of working budget left (`total_s=11.0`, with the
+    default 10s reserved tail) makes the opening sleep -- itself clamped --
+    consume exactly that budget, landing the clock exactly on the ceiling. The
+    next iteration's ceiling check then fires first, before `can_afford` is
+    ever consulted, and only the ceiling branch's message names the export
+    deadline. A bound on the clock alone cannot tell `clamp` apart from its
+    absence here: both land on the same clock value (`can_afford` sees the
+    same exhausted budget either way and raises its own message instead), so
+    it is the message, not the clock, that discriminates.
+    """
     clock, _, sleep = _fixtures()
     api = _ExportApi([])  # never completes
-    with pytest.raises(ClientError):
+    with pytest.raises(ClientError) as caught:
+        await export_page(api, _fixed_downloader("x"), "page-x", "markdown",
+                          Deadline(total_s=11.0, clock=clock),
+                          clock=clock, sleep=sleep)
+    assert clock() == 1.0
+    assert "did not complete within the export deadline" in str(caught.value)
+
+
+async def test_a_tool_deadline_running_out_says_so_and_not_the_ceiling():
+    """The two give-up messages are different facts a reader acts on
+    differently, so they must actually be distinguishable. Here `can_afford`
+    is what ends the loop -- well short of the (looser) export ceiling -- and
+    only its message names the tool call's own time running out."""
+    clock, _, sleep = _fixtures()
+    api = _ExportApi([])  # never completes
+    with pytest.raises(ClientError) as caught:
         await export_page(api, _fixed_downloader("x"), "page-x", "markdown",
                           Deadline(total_s=20.0, clock=clock),
                           clock=clock, sleep=sleep)
-    assert clock() <= 20.0
+    assert clock() == 7.0
+    assert "ran out of time" in str(caught.value)
 
 
 async def test_the_opening_wait_is_clamped_like_every_other():
