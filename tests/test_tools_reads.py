@@ -3,17 +3,28 @@ vocabulary and `api.py`, wrapped by `tool_boundary` and registered by
 `register_read_tools`.
 """
 
+from contextlib import asynccontextmanager
+
+import pytest
+from mcp import Client
+
 from superhumandoc_mcp.api import Listing
 from superhumandoc_mcp.deadline import Deadline
+from superhumandoc_mcp.errors import ClientError
+from superhumandoc_mcp.gate import ExportGate
 from superhumandoc_mcp.schema_cache import ColumnCache
+from superhumandoc_mcp.server import build_server
 from superhumandoc_mcp.tools.reads import (
     OVERVIEW_INLINE_COLUMNS_MAX_TABLES,
+    _PageCache,
     describe_table,
     find_rows,
     get_doc_overview,
     get_row,
     outline_page,
+    read_page,
 )
+from tests.conftest import _config, _counting_downloader, _fixed_downloader, _fixtures
 
 
 class _FakeApi:
@@ -368,3 +379,191 @@ async def test_a_listing_the_deadline_cut_short_keeps_its_rows_and_says_so():
     assert result["complete"] is False
     assert "deadline" in result["note"]
     assert "not all of it" in result["note"]
+
+
+# --- read_page -----------------------------------------------------------
+
+
+class _PageApi:
+    """Stands in for `DocsApi` for `read_page`: answers `get_page` with a
+    fixed `contentType`/`updatedAt`, and completes exactly one export via
+    `begin_export`/`get_export_status` — a single poll that always comes
+    back terminal. The poll loop itself is `export.py`'s own concern,
+    exercised on its own terms in tests/test_export.py; what these tests pin
+    is what `read_page` does around it — the content-type gate, the cache,
+    and entering the gate — not the loop's shape."""
+
+    def __init__(self, *, content_type: str, updated_at: str | None = None) -> None:
+        self.content_type = content_type
+        self.updated_at = updated_at
+        self._next_id = 0
+
+    async def get_page(self, page: str, deadline: Deadline) -> dict:
+        return {"contentType": self.content_type, "updatedAt": self.updated_at}
+
+    async def begin_export(self, page: str, output_format: str, deadline: Deadline) -> dict:
+        self._next_id += 1
+        return {"id": f"export-{self._next_id}"}
+
+    async def get_export_status(
+        self, page: str, request_id: str, deadline: Deadline
+    ) -> dict:
+        return {"downloadLink": f"https://example.test/{page}/{request_id}"}
+
+
+class _RecordingGate:
+    """Stands in for `ExportGate`: records the page id `for_page` is entered
+    with, rather than actually serialising anything, so a test can pin that
+    `read_page` enters the gate rather than merely accepting one and never
+    using it."""
+
+    def __init__(self) -> None:
+        self.entered: list[str] = []
+
+    @asynccontextmanager
+    async def for_page(self, page_id: str, deadline: Deadline):
+        self.entered.append(page_id)
+        yield
+
+
+async def test_read_page_returns_the_page_as_html():
+    clock, _, sleep = _fixtures()
+    result = await read_page(
+        _PageApi(content_type="canvas"),
+        _fixed_downloader("<h1>Hi</h1>"),
+        ExportGate(),
+        _PageCache(),
+        "page-x",
+        clock=clock,
+        sleep=sleep,
+    )
+    assert result["html"] == "<h1>Hi</h1>"
+
+
+@pytest.mark.parametrize("content_type", ["syncPage", "embed"])
+async def test_a_page_that_cannot_be_exported_is_refused_by_its_type(content_type):
+    """The type is readable in advance, so this costs one cheap read rather
+    than a kickoff, a poll and a 400. The message names the type, because
+    "export failed" gives a model nothing to do differently."""
+    clock, _, sleep = _fixtures()
+    with pytest.raises(ClientError) as caught:
+        await read_page(
+            _PageApi(content_type=content_type),
+            _fixed_downloader("x"),
+            ExportGate(),
+            _PageCache(),
+            "page-x",
+            clock=clock,
+            sleep=sleep,
+        )
+    assert content_type in str(caught.value)
+
+
+async def test_an_unchanged_page_is_not_exported_twice():
+    """Export is the most expensive thing on this surface. The cache is keyed
+    on the page and its updatedAt, so a second read of an unchanged page costs
+    one cheap page read."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at="2026-09-07T10:00:00Z")
+    cache, downloader = _PageCache(), _counting_downloader("<p>x</p>")
+    for _ in range(2):
+        await read_page(
+            api, downloader, ExportGate(), cache, "page-x", clock=clock, sleep=sleep
+        )
+    assert downloader.calls == 1
+
+
+async def test_a_changed_page_is_exported_again():
+    """Serving a stale render after an edit is worse than the cost the cache
+    saves -- it would report the document as it was and give no sign of it."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at="2026-09-07T10:00:00Z")
+    cache, downloader = _PageCache(), _counting_downloader("<p>x</p>")
+    await read_page(
+        api, downloader, ExportGate(), cache, "page-x", clock=clock, sleep=sleep
+    )
+    api.updated_at = "2026-09-07T11:00:00Z"
+    await read_page(
+        api, downloader, ExportGate(), cache, "page-x", clock=clock, sleep=sleep
+    )
+    assert downloader.calls == 2
+
+
+async def test_two_pages_sharing_a_timestamp_do_not_share_a_render():
+    """The cache key is the page *and* the timestamp. Keyed on the timestamp
+    alone -- a fair reading of "cached against updatedAt" -- this returns page
+    A's HTML for page B, which is silent wrong-page content and the worst thing
+    this tool could do. Two pages sharing an updatedAt is ordinary after a bulk
+    edit or a duplicated template."""
+    clock, _, sleep = _fixtures()
+    stamp = "2026-09-07T10:00:00Z"
+    cache = _PageCache()
+    a = await read_page(
+        _PageApi(content_type="canvas", updated_at=stamp),
+        _fixed_downloader("<p>A</p>"),
+        ExportGate(),
+        cache,
+        "page-a",
+        clock=clock,
+        sleep=sleep,
+    )
+    b = await read_page(
+        _PageApi(content_type="canvas", updated_at=stamp),
+        _fixed_downloader("<p>B</p>"),
+        ExportGate(),
+        cache,
+        "page-b",
+        clock=clock,
+        sleep=sleep,
+    )
+    assert (a["html"], b["html"]) == ("<p>A</p>", "<p>B</p>")
+
+
+async def test_a_page_with_no_timestamp_is_not_cached():
+    """A render that cannot be invalidated is worse than one that costs
+    something. With no updatedAt there is nothing to compare against, so the
+    only safe answer is to export again."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at=None)
+    cache, downloader = _PageCache(), _counting_downloader("<p>x</p>")
+    for _ in range(2):
+        await read_page(
+            api, downloader, ExportGate(), cache, "page-x", clock=clock, sleep=sleep
+        )
+    assert downloader.calls == 2
+
+
+async def test_the_export_runs_inside_the_gate():
+    """`read_page` takes a gate because per-page serialisation is a correctness
+    constraint, not pacing -- two concurrent exports of one page contend for a
+    single blob. A read_page that accepted the gate and forgot to enter it would
+    pass every other test here."""
+    clock, _, sleep = _fixtures()
+    gate = _RecordingGate()
+    await read_page(
+        _PageApi(content_type="canvas"),
+        _fixed_downloader("x"),
+        gate,
+        _PageCache(),
+        "page-x",
+        clock=clock,
+        sleep=sleep,
+    )
+    assert gate.entered == ["page-x"]
+
+
+async def test_read_page_says_what_it_is_and_what_must_not_be_done_with_it():
+    """The only enforcement the read-is-never-a-write-source rule has on the
+    read side. Its sibling on the write side checks for a word tied to the
+    clause it protects; checking only "projection" would pass a description
+    that never mentions writing the output back at all."""
+    async with Client(build_server(_config())) as client:
+        tool = next(
+            t for t in (await client.list_tools()).tools if t.name == "read_page"
+        )
+    lowered = tool.description.lower()
+    assert "projection" in lowered
+    assert "must not" in lowered
+    assert "write" in lowered
+    for construct in ("image", "table", "button", "control", "callout", "divider"):
+        assert construct in lowered

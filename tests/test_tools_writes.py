@@ -42,7 +42,6 @@ from tests.conftest import (
     _config,
     _fixtures,
     _rows,
-    _tool_names,
 )
 
 
@@ -189,13 +188,6 @@ async def test_every_write_tool_says_its_output_must_not_be_fed_back():
             if tool.name in _CONTENT_WRITE_NAMES:
                 assert "must not" in tool.description.lower()
                 assert "read" in tool.description.lower()
-
-
-async def test_read_page_is_still_not_registered():
-    """The last always-on tool with no implementation. Its absence is
-    declared, and this pins that it stays declared rather than half-built."""
-    names = await _tool_names(build_server(_config()))
-    assert "read_page" not in names
 
 
 # --- update_row and upsert_rows -----------------------------------------

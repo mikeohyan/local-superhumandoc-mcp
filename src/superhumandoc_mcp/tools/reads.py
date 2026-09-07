@@ -6,12 +6,30 @@ each one over a single `DocsApi` instance and puts it on the server, because
 the object the model calls cannot itself take an `api` argument.
 """
 
+import asyncio
+import time
+from collections.abc import Awaitable, Callable
+
 from mcp.server import MCPServer
 
 from superhumandoc_mcp.api import DocsApi
 from superhumandoc_mcp.deadline import Deadline
+from superhumandoc_mcp.downloads import Downloader
+from superhumandoc_mcp.errors import ClientError
+from superhumandoc_mcp.export import export_page
+from superhumandoc_mcp.gate import ExportGate
 from superhumandoc_mcp.schema_cache import ColumnCache
 from superhumandoc_mcp.tools.boundary import tool_boundary
+
+# The only contentType read_page can export. Embed and sync pages are
+# refused before any export is attempted, because contentType is readable
+# up front -- the tool-surface topic requires that refusal name the type
+# found rather than let a caller discover it from a failed export.
+_EXPORTABLE_CONTENT_TYPE = "canvas"
+
+# read_page always renders HTML; export_page's output_format is not
+# model-visible here the way it is exercised directly in tests/test_export.py.
+_READ_PAGE_OUTPUT_FORMAT = "html"
 
 # Recorded in docs/reference/api-operational-constants.md. At or below this
 # many tables, get_doc_overview also returns each table's column schema
@@ -52,6 +70,23 @@ _FIND_ROWS_DESCRIPTION = (
     "each row carrying its row ID. Server-side filtering supports at most "
     "one column, exact-value match only; every other condition is applied "
     "client-side after paging."
+)
+
+_READ_PAGE_DESCRIPTION = (
+    "Return a page's content rendered as HTML. Expensive: this runs an "
+    "asynchronous export rather than a plain read, so call outline_page "
+    "instead when only the text and its structure are needed. The result "
+    "is a projection of the page, not the page itself — images, tables, "
+    "buttons, controls, callouts and dividers may be missing or flattened "
+    "in the rendered output, so this must not be treated as an "
+    "authoritative account of everything the page contains. Requires "
+    "`contentType == \"canvas\"`; embed and sync pages cannot be exported "
+    "and are refused, naming the content type found, before any export is "
+    "attempted. Rendered content is cached against the page's `updatedAt`, "
+    "so re-reading an unchanged page is cheap. Its output must not be sent "
+    "back to create_page, append_to_page, replace_element, or any other "
+    "write on this surface — writing a read back out is exactly the loop "
+    "that compounds content loss on every pass."
 )
 
 
@@ -232,6 +267,84 @@ async def find_rows(
     return {"rows": resolved, "complete": listing.complete, "note": note}
 
 
+class _PageCache:
+    """Caches a page's rendered HTML, keyed on `(page_id, updatedAt)` —
+    both parts, never `updatedAt` alone. Two pages sharing a timestamp is
+    ordinary after a bulk edit or a duplicated template; keying on the
+    timestamp alone would serve one page's render for the other, which is
+    silent wrong-page content.
+
+    A missing or null `updatedAt` is not a cache key at all: `get` always
+    misses and `set` is a no-op, because a render that cannot be
+    invalidated is worse than paying for another export.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple[str, str], str] = {}
+
+    def get(self, page_id: str, updated_at: str | None) -> str | None:
+        if updated_at is None:
+            return None
+        return self._entries.get((page_id, updated_at))
+
+    def set(self, page_id: str, updated_at: str | None, html: str) -> None:
+        if updated_at is None:
+            return
+        self._entries[(page_id, updated_at)] = html
+
+
+async def read_page(
+    api: DocsApi,
+    downloader: Downloader,
+    gate: ExportGate,
+    cache: _PageCache,
+    page_id_or_name: str,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> dict:
+    """Return `{"html": ...}`, the page rendered through the export flow.
+
+    `get_page` is read first, cheaply, because `contentType` is knowable in
+    advance: a page that is not `canvas` is refused immediately, naming the
+    content type found, rather than discovered only after a kickoff, a poll
+    and a failed export. The same read's `updatedAt` is the cache key's
+    other half, so an unchanged page never pays for a second export.
+
+    The export itself runs inside `gate.for_page(...)`: exports of one page
+    are serialised because the blob they render into is keyed by page and
+    document, not by request id, so two concurrent exports of the same page
+    would contend for one blob rather than run independently.
+    """
+    deadline = Deadline(clock=clock)
+    page = await api.get_page(page_id_or_name, deadline)
+    content_type = page.get("contentType")
+    if content_type != _EXPORTABLE_CONTENT_TYPE:
+        raise ClientError(
+            f"page {page_id_or_name!r} has contentType {content_type!r}, "
+            "which cannot be exported — only canvas pages can be read this "
+            "way."
+        )
+
+    updated_at = page.get("updatedAt")
+    cached = cache.get(page_id_or_name, updated_at)
+    if cached is not None:
+        return {"html": cached}
+
+    async with gate.for_page(page_id_or_name, deadline):
+        html = await export_page(
+            api,
+            downloader,
+            page_id_or_name,
+            _READ_PAGE_OUTPUT_FORMAT,
+            deadline,
+            clock=clock,
+            sleep=sleep,
+        )
+    cache.set(page_id_or_name, updated_at, html)
+    return {"html": html}
+
+
 def register_read_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) -> None:
     """Register the always-on read tools on `server`, closing over `api`.
 
@@ -243,6 +356,13 @@ def register_read_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) -> 
     columns through the same `ColumnCache` — two copies would disagree after
     the first write, which is exactly the case `schema_cache.py` warns
     about.
+
+    `read_page`'s own `Downloader`, `ExportGate` and `_PageCache` are built
+    locally, right here, rather than threaded in as parameters: this
+    registrar's signature is still the one the rest of this module uses,
+    and widening it to carry export-only collaborators belongs to the task
+    that also moves their construction up into `build_server`, alongside
+    the `DocsApi` and `ColumnCache` every registrar already shares that way.
     """
 
     @server.tool(name="outline_page", description=_OUTLINE_PAGE_DESCRIPTION)
@@ -278,3 +398,12 @@ def register_read_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) -> 
         return await find_rows(
             api, cache, table_id_or_name, filters=filters, sort=sort, limit=limit
         )
+
+    downloader = Downloader()
+    gate = ExportGate()
+    page_cache = _PageCache()
+
+    @server.tool(name="read_page", description=_READ_PAGE_DESCRIPTION)
+    @tool_boundary
+    async def read_page_tool(page_id_or_name: str) -> dict:
+        return await read_page(api, downloader, gate, page_cache, page_id_or_name)
