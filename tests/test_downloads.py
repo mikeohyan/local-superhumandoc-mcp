@@ -2,11 +2,13 @@
 
 `Downloader` is the only client in this codebase that talks to a host other
 than the API: no bearer token, no rate-limit bucket, and a different failure
-shape than anything `client.py` handles. These tests pin the three things
-that make a downloaded body unusable -- and, as importantly, the two things
-that look like failures but are not: an XML declaration with no `<Error`
-element (legitimate XHTML), and an empty body (a blank canvas page).
+shape than anything `client.py` handles. These tests pin the things that make
+a downloaded body unusable -- and, as importantly, the things that look like
+failures but are not: an XML declaration with no `<Error` element (legitimate
+XHTML), and an empty body (a blank canvas page).
 """
+
+import gzip
 
 import httpx2
 import pytest
@@ -65,12 +67,24 @@ async def test_an_error_document_is_refused_however_it_is_dressed(status, body):
         await _downloader(_responding(status, body)).fetch("https://s3/x", Deadline())
 
 
-@pytest.mark.parametrize("status,body", [(500, "upstream boom"), (503, "")])
+@pytest.mark.parametrize(
+    "status,body",
+    [
+        (500, "upstream boom"),
+        (503, ""),
+        (404, "Not Found"),
+        (400, "plain text bad request"),
+        (502, "<html><body>Bad Gateway</body></html>"),
+    ],
+)
 async def test_a_failing_status_is_refused_whatever_the_body_says(status, body):
     """The XML check alone passes these straight through as the page. A 500
     with a plaintext body, or an error page from something in front of the
     bucket, is not content -- and the failure is silent, surfacing as wrong
-    content rather than as an error."""
+    content rather than as an error. The 4xx cases pin that the status check
+    covers the whole non-2xx range, not just 5xx: a 4xx with a body that is
+    neither XML nor an S3 error document must still be refused on status
+    alone."""
     with pytest.raises(DownloadUnusable):
         await _downloader(_responding(status, body)).fetch("https://s3/x", Deadline())
 
@@ -111,28 +125,108 @@ async def test_an_empty_body_is_content_not_a_failure():
 
 
 async def test_a_refusal_never_repeats_the_link_s_signature():
-    """A download link is pre-signed: its query carries X-Amz-Credential and
-    X-Amz-Signature, which together grant read access to the blob until the
-    link expires. That is a credential, and a refusal's text is the first
-    thing this client repeats to a model -- the same reason the API client
-    redacts its bearer token out of an upstream refusal's detail.
-
-    The path survives, because it says which object failed and that is what a
-    reader needs.
+    """A download link is pre-signed. `docs/reference/api-operational-constants.md`
+    section 2.5 records the download host as `docs.superhuman.com/blobs/...`,
+    and probe P5b (`docs/validation/2026-09-03-api-operational-probes.md`) is
+    the only place any query parameters were directly observed on a real
+    signed link: `X-Amz-Date` and `X-Amz-Expires`. Neither probe nor the
+    reference doc ever recorded `X-Amz-Credential` or `X-Amz-Signature` on
+    this link -- so this fixture asserts against the recorded shape, not an
+    invented one, while still pinning the actual point: `_without_signature`
+    strips the whole query string regardless of what is in it, so no query
+    parameter -- named or not -- ever reaches a refusal message, and neither
+    does a value drawn from the query.
     """
     signed = (
-        "https://coda-us-west-2-prod-workflow-objects.s3.us-west-2.amazonaws.com"
-        "/DOC_EXPORT_RENDERING/page-x/doc-y"
-        "?X-Amz-Credential=ASIAQNTH22RI577ZUYAW%2F20260907%2Fus-west-2"
-        "&X-Amz-Signature=deadbeefcafe&X-Amz-Expires=300"
+        "https://docs.superhuman.com/blobs/DOC_EXPORT_RENDERING/page-x/doc-y"
+        "?X-Amz-Date=20260904T010143Z&X-Amz-Expires=300"
     )
     with pytest.raises(DownloadUnusable) as caught:
         await _downloader(_responding(403, "<Error><Code>AccessDenied</Code></Error>")).fetch(
             signed, Deadline()
         )
     message = str(caught.value)
-    assert "X-Amz-Signature" not in message
-    assert "X-Amz-Credential" not in message
-    assert "deadbeefcafe" not in message
+    assert "X-Amz-Date" not in message
+    assert "X-Amz-Expires" not in message
+    assert "20260904T010143Z" not in message
     assert "DOC_EXPORT_RENDERING/page-x/doc-y" in message
+
+
+async def test_the_reserved_tail_is_spent_on_the_terminal_fetch():
+    """`deadline.py` reserves a tail specifically so the terminal download can
+    spend it: `remaining_with_tail()` includes the reserve, `remaining()`
+    does not. Pin that `fetch` passes the former, not the latter, to the
+    underlying `get` -- swapping to `remaining()` would silently shrink every
+    download's timeout by the whole reserved tail and leaves every other test
+    here passing.
+    """
+    seen_timeout = {}
+
+    def handler(request):
+        seen_timeout.update(request.extensions["timeout"])
+        return httpx2.Response(200, text="body")
+
+    deadline = Deadline(total_s=100.0, reserved_tail_s=10.0, clock=lambda: 0.0)
+    await _downloader(handler).fetch("https://s3/x", deadline)
+
+    assert seen_timeout["read"] == deadline.remaining_with_tail() == 100.0
+    assert deadline.remaining() == 90.0
+    assert seen_timeout["read"] != deadline.remaining()
+
+
+async def test_a_transport_failure_is_raised_as_download_unusable():
+    """A timeout, connect failure, or protocol error from `self._http.get`
+    used to propagate raw: `export_page`'s `except DownloadUnusable` could not
+    catch it, so no link re-mint was attempted, and `tool_boundary` could not
+    catch it either since it is not a `ClientError`. This is the most likely
+    download failure, not an exotic one, because the timeout passed to `get`
+    is `deadline.remaining_with_tail()` -- a slow export leaves a short fuse
+    on exactly this call.
+    """
+
+    def handler(request):
+        raise httpx2.ReadTimeout("timed out", request=request)
+
+    with pytest.raises(DownloadUnusable):
+        await _downloader(handler).fetch("https://s3/x", Deadline())
+
+
+async def test_a_transport_failure_does_not_repeat_the_link_s_signature():
+    """The same credential-leak rule applies to a transport failure's message
+    as to a status or S3-error refusal: the URL passed through must be the
+    one with its query string stripped."""
+    signed = "https://docs.superhuman.com/blobs/DOC_EXPORT_RENDERING/page-x/doc-y?X-Amz-Date=20260904T010143Z&X-Amz-Expires=300"
+
+    def handler(request):
+        raise httpx2.ConnectError("connection refused", request=request)
+
+    with pytest.raises(DownloadUnusable) as caught:
+        await _downloader(handler).fetch(signed, Deadline())
+    message = str(caught.value)
+    assert "X-Amz-Date" not in message
+    assert "20260904T010143Z" not in message
+    assert "DOC_EXPORT_RENDERING/page-x/doc-y" in message
+
+
+async def test_a_gzip_encoded_body_decodes_before_the_error_check():
+    """`docs/reference/api-operational-constants.md` section 2.5 records that
+    every real successful download arrives `Content-Encoding: gzip`, and that
+    httpx2 selects a decoder from that header before `.text` (or `.content`,
+    or `.json()`) is read -- only `iter_raw`/`aiter_raw` see the compressed
+    bytes. This builds a genuinely gzip-encoded response (compressed bytes
+    plus the header, not `text=`) through the same `MockTransport` every other
+    test here uses, to confirm real decoding happens through this transport
+    rather than merely through the test doubles that pass `text=` directly.
+    """
+    payload = "# A heading\n\nSome text."
+
+    def handler(request):
+        return httpx2.Response(
+            200,
+            content=gzip.compress(payload.encode()),
+            headers={"Content-Encoding": "gzip", "Content-Type": "text/plain"},
+        )
+
+    result = await _downloader(handler).fetch("https://s3/x", Deadline())
+    assert result == payload
 

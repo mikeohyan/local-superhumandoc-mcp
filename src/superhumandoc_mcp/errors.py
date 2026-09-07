@@ -116,8 +116,11 @@ class DownloadUnusable(ClientError):
     Raised by the tokenless download hop, never by `DocsClient`: the download
     host is not the API, so none of the classes above — which are about a
     request to the API succeeding, failing, or leaving its outcome unknown —
-    describe what went wrong here. The message says which of the two reasons
-    applied, because "download failed" gives a caller nothing to act on.
+    describe what went wrong here. The message names the specific reason —
+    a refusing status, an error document served as content, or a call that
+    never reached a response at all — because "download failed" gives a
+    caller nothing to act on. It carries the link's path and never its
+    query, which holds the signature that authorises the fetch.
     """
 
     def __init__(self, url: str, reason: str) -> None:

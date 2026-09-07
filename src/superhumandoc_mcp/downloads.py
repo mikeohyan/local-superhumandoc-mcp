@@ -39,10 +39,25 @@ class Downloader:
         decodes to readable markdown or HTML while an error body is plain
         XML, so `.text` is the right thing to check for both; nothing here
         needs the raw byte stream.
+
+        A fourth thing makes the *call* unusable rather than the response: a
+        timeout, connect failure, or protocol error raised by `self._http.get`
+        itself, before any response exists to inspect. Left uncaught that
+        propagates raw -- past `export_page`'s `except DownloadUnusable`, so
+        the re-mint ladder never runs, and past `tool_boundary`, since it is
+        not a `ClientError`, so the model sees only the SDK's redacted tool
+        error. It is caught here and re-raised as `DownloadUnusable` so both
+        of those already exist for it.
         """
-        response = await self._http.get(
-            url, timeout=deadline.remaining_with_tail()
-        )
+        try:
+            response = await self._http.get(
+                url, timeout=deadline.remaining_with_tail()
+            )
+        except httpx2.RequestError as exc:
+            raise DownloadUnusable(
+                _without_signature(url),
+                f"the download failed before a response arrived: {exc}.",
+            ) from exc
         if not (200 <= response.status_code < 300):
             raise DownloadUnusable(
                 _without_signature(url),
