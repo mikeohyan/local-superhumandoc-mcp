@@ -29,7 +29,7 @@ from superhumandoc_mcp.tools.writes import (
 from tests.conftest import (
     _CALCULATED_COLUMN,
     _NAME_COLUMN,
-    _WRITE_TOOL_NAMES,
+    _CONTENT_WRITE_NAMES,
     _config,
     _fixtures,
     _rows,
@@ -177,7 +177,7 @@ async def test_every_write_tool_says_its_output_must_not_be_fed_back():
     an unenforced rule."""
     async with Client(build_server(_config())) as client:
         for tool in (await client.list_tools()).tools:
-            if tool.name in _WRITE_TOOL_NAMES:
+            if tool.name in _CONTENT_WRITE_NAMES:
                 assert "must not" in tool.description.lower()
                 assert "read" in tool.description.lower()
 

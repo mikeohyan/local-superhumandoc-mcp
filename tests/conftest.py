@@ -100,6 +100,27 @@ _WRITE_TOOL_NAMES = {
 } | _GATED_NAMES
 
 
+# The write tools that carry something the caller composed — page content, a
+# page name, or cell values. These are the ones the rule "a read is never a
+# write source" can actually be stated for, and the only ones whose
+# descriptions are required to state it.
+#
+# The other five write tools name a thing to act on and carry no content at
+# all: delete_page, clear_page_content, delete_rows, push_button and
+# delete_element. Requiring them to warn against feeding a read back would buy
+# a passing assertion and no guarantee — the words would have to be bent to
+# fit, and a test satisfied by bent words stops discriminating.
+_CONTENT_WRITE_NAMES = {
+    "create_page",
+    "append_to_page",
+    "replace_element",
+    "rename_page",
+    "update_row",
+    "upsert_rows",
+    "overwrite_page",
+}
+
+
 def _config(allow_destructive: bool = False) -> Config:
     """The same configuration `tests/test_server.py` builds. Repeated here so
     the write-tool tests do not import from a sibling test module."""
