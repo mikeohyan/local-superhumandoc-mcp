@@ -12,8 +12,10 @@ class _StatusApi:
 
     def __init__(self, replies):
         self._replies = list(replies)
+        self.calls = 0
 
     async def get_mutation_status(self, request_id, deadline):
+        self.calls += 1
         reply = self._replies.pop(0) if self._replies else {"completed": False}
         if isinstance(reply, Exception):
             raise reply
@@ -120,13 +122,44 @@ async def test_the_opening_wait_cannot_overrun_the_deadline_either():
     is the one that can overshoot unchecked. A mutation polled with almost no
     budget left must not spend more than the budget waiting to start: past
     `remaining()` lies the reserved tail, which exists for the terminal fetch
-    of a result already paid for."""
+    of a result already paid for.
+
+    This squeeze — `Deadline(total_s=11.0)`, which leaves `remaining()` at
+    1.0s once the reserved tail is subtracted — is also the case where the
+    ceiling-and-afford check would otherwise gate the very first poll: after
+    the clamped opening sleep, `clock()` lands exactly on `ceiling`, so a loop
+    condition checked before polling would never ask the API even once. The
+    call must still get its one cheap question, and here the API answers it
+    immediately.
+    """
     clock, slept, sleep = _fixtures()
     deadline = Deadline(total_s=11.0, clock=clock)
     api = _StatusApi([{"completed": True}])
 
-    await await_mutation(api, "r", deadline, clock=clock, sleep=sleep)
+    outcome = await await_mutation(api, "r", deadline, clock=clock, sleep=sleep)
 
     assert slept[0] == 1.0
     assert clock() <= 1.0
+    assert api.calls == 1
+    assert outcome.applied is True
+    assert outcome.detail == "applied"
+
+
+async def test_a_squeezed_deadline_still_gets_exactly_one_poll():
+    """The defect this pins: `await_mutation` returned `UNKNOWN` without ever
+    calling `get_mutation_status`, whenever the deadline's remaining budget at
+    call time was smaller than the poll interval. A write that already sent
+    its mutation and got its 202 deserves at least one cheap question before
+    this call gives up and reports "unknown" — asking once and often learning
+    the real answer is strictly better than never asking at all."""
+    clock, _, sleep = _fixtures()
+    api = _StatusApi([{"completed": True}])
+
+    outcome = await await_mutation(
+        api, "r", Deadline(total_s=11.0, clock=clock), clock=clock, sleep=sleep
+    )
+
+    assert api.calls == 1
+    assert outcome.applied is True
+    assert outcome.detail == "applied"
 

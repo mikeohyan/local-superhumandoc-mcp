@@ -57,6 +57,13 @@ async def await_mutation(
 ) -> MutationOutcome:
     """Poll one mutation to completion, or to a bounded give-up.
 
+    The poll itself always runs at least once after the opening sleep, rather
+    than being gated by the same ceiling check that ends the loop: a call made
+    with almost no budget left must still get to ask its one question, or a
+    write placed near its own deadline could report "unknown" without ever
+    checking whether the mutation it just sent already applied. Everything
+    after that first question is bounded the usual way.
+
     The operation's own ceiling never extends the tool call's: `clamp` takes
     the lesser, so a deadline that has less than `MUTATION_DEADLINE_S` left
     still governs. A 404 is caught here, around each status call, rather than
@@ -69,12 +76,12 @@ async def await_mutation(
     ceiling = started + deadline.clamp(MUTATION_DEADLINE_S)
     grace_ends = started + MUTATION_404_GRACE_S
     interval = MUTATION_POLL_INTERVAL_S
-    # Clamped like every other subordinate wait. The opening sleep is the one
-    # that would otherwise run unchecked, and a mutation polled with almost no
-    # budget left would spend it — and then some of the reserved tail — before
-    # asking a single question.
+    # Clamped like every other subordinate wait. Unclamped, this is the sleep
+    # that would run before any loop condition is even checked and so could
+    # overshoot straight into the reserved tail before a single question is
+    # asked.
     await sleep(deadline.clamp(MUTATION_INITIAL_SLEEP_S))
-    while clock() < ceiling and deadline.can_afford(interval):
+    while True:
         try:
             body = await api.get_mutation_status(request_id, deadline)
         except UpstreamRefused as refusal:
@@ -87,6 +94,12 @@ async def await_mutation(
         else:
             if body.get("completed"):
                 return MutationOutcome(True, body.get("warning"), "applied")
+        if clock() >= ceiling:
+            return MutationOutcome(False, None, UNKNOWN)
+        if not deadline.can_afford(interval):
+            # Said separately from the ceiling above, because they are
+            # different facts: one means the mutation is slow, the other that
+            # this tool call had other work to pay for first.
+            return MutationOutcome(False, None, UNKNOWN)
         await sleep(interval)
         interval = min(interval * MUTATION_POLL_BACKOFF, MUTATION_POLL_MAX_INTERVAL_S)
-    return MutationOutcome(False, None, UNKNOWN)
