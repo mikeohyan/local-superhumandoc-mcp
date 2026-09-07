@@ -27,8 +27,9 @@ from superhumandoc_mcp.tools.boundary import tool_boundary
 # found rather than let a caller discover it from a failed export.
 _EXPORTABLE_CONTENT_TYPE = "canvas"
 
-# read_page always renders HTML; export_page's output_format is not
-# model-visible here the way it is exercised directly in tests/test_export.py.
+# The export supports markdown too, and the two differ -- markdown drops
+# page-level attachments where HTML retains them -- but the tool-surface
+# topic names one format, so this is fixed rather than model-visible.
 _READ_PAGE_OUTPUT_FORMAT = "html"
 
 # Recorded in docs/reference/api-operational-constants.md. At or below this
@@ -267,7 +268,7 @@ async def find_rows(
     return {"rows": resolved, "complete": listing.complete, "note": note}
 
 
-class _PageCache:
+class PageCache:
     """Caches a page's rendered HTML, keyed on `(page_id, updatedAt)` —
     both parts, never `updatedAt` alone. Two pages sharing a timestamp is
     ordinary after a bulk edit or a duplicated template; keying on the
@@ -297,7 +298,7 @@ async def read_page(
     api: DocsApi,
     downloader: Downloader,
     gate: ExportGate,
-    cache: _PageCache,
+    cache: PageCache,
     page_id_or_name: str,
     *,
     clock: Callable[[], float] = time.monotonic,
@@ -345,24 +346,34 @@ async def read_page(
     return {"html": html}
 
 
-def register_read_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) -> None:
+def register_read_tools(
+    server: MCPServer,
+    api: DocsApi,
+    columns: ColumnCache,
+    downloader: Downloader,
+    gate: ExportGate,
+    pages: PageCache,
+) -> None:
     """Register the always-on read tools on `server`, closing over `api`.
 
     The registered tool cannot take `api` as a model-visible parameter, so
     each one here is a thin wrapper that closes over the single `DocsApi`
     instance passed in and delegates to the directly-testable function above.
-    `cache` is constructed once in `build_server` and passed in, rather than
-    built here, so the write tools this server also registers resolve
+    `columns` is constructed once in `build_server` and passed in, rather
+    than built here, so the write tools this server also registers resolve
     columns through the same `ColumnCache` — two copies would disagree after
     the first write, which is exactly the case `schema_cache.py` warns
-    about.
+    about. `downloader`, `gate` and `pages` are constructed the same way, in
+    `build_server`, for the same reason: `read_page` is the only tool that
+    uses them, but a `ColumnCache`-per-call mistake and an `ExportGate`-per-
+    call mistake are the same bug, and `server.py`'s docstring says why one
+    of each must serve the whole server.
 
-    `read_page`'s own `Downloader`, `ExportGate` and `_PageCache` are built
-    locally, right here, rather than threaded in as parameters: this
-    registrar's signature is still the one the rest of this module uses,
-    and widening it to carry export-only collaborators belongs to the task
-    that also moves their construction up into `build_server`, alongside
-    the `DocsApi` and `ColumnCache` every registrar already shares that way.
+    Parameter names distinguish the two caches on purpose: `columns` for the
+    `ColumnCache` this function shares with `register_write_tools`, `pages`
+    for the page-content `PageCache` `read_page` alone uses. A signature
+    with two params both called `cache` is exactly the kind of ambiguity
+    that gets one passed where the other belongs.
     """
 
     @server.tool(name="outline_page", description=_OUTLINE_PAGE_DESCRIPTION)
@@ -373,19 +384,19 @@ def register_read_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) -> 
     @server.tool(name="describe_table", description=_DESCRIBE_TABLE_DESCRIPTION)
     @tool_boundary
     async def describe_table_tool(table_id_or_name: str) -> list[dict]:
-        return await describe_table(cache, table_id_or_name)
+        return await describe_table(columns, table_id_or_name)
 
     @server.tool(
         name="get_doc_overview", description=_GET_DOC_OVERVIEW_DESCRIPTION
     )
     @tool_boundary
     async def get_doc_overview_tool() -> dict:
-        return await get_doc_overview(api, cache)
+        return await get_doc_overview(api, columns)
 
     @server.tool(name="get_row", description=_GET_ROW_DESCRIPTION)
     @tool_boundary
     async def get_row_tool(table_id_or_name: str, row_id: str) -> dict:
-        return await get_row(api, cache, table_id_or_name, row_id)
+        return await get_row(api, columns, table_id_or_name, row_id)
 
     @server.tool(name="find_rows", description=_FIND_ROWS_DESCRIPTION)
     @tool_boundary
@@ -396,14 +407,10 @@ def register_read_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) -> 
         limit: int = 200,
     ) -> list[dict]:
         return await find_rows(
-            api, cache, table_id_or_name, filters=filters, sort=sort, limit=limit
+            api, columns, table_id_or_name, filters=filters, sort=sort, limit=limit
         )
-
-    downloader = Downloader()
-    gate = ExportGate()
-    page_cache = _PageCache()
 
     @server.tool(name="read_page", description=_READ_PAGE_DESCRIPTION)
     @tool_boundary
     async def read_page_tool(page_id_or_name: str) -> dict:
-        return await read_page(api, downloader, gate, page_cache, page_id_or_name)
+        return await read_page(api, downloader, gate, pages, page_id_or_name)

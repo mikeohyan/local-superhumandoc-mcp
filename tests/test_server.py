@@ -10,6 +10,7 @@ from pathlib import Path
 from mcp import Client
 
 from superhumandoc_mcp.config import Config
+from superhumandoc_mcp.gate import ExportGate
 from superhumandoc_mcp.server import build_server
 from tests.conftest import _GATED_NAMES, _tool_names
 
@@ -76,3 +77,21 @@ async def test_the_flag_adds_exactly_the_gated_tools_and_nothing_else() -> None:
     off = await _tool_names(build_server(_config(allow_destructive=False)))
     on = await _tool_names(build_server(_config(allow_destructive=True)))
     assert on - off == _GATED_NAMES
+
+
+async def test_one_export_gate_serves_the_whole_server(monkeypatch):
+    """A gate built per call, or per tool, enforces nothing: two concurrent
+    calls would each hold their own and both proceed, which is precisely the
+    collision the per-page limit exists to prevent. Counting constructions
+    tests that directly, without reaching into the tool manager's private
+    registry to fish a closure out of a decorated wrapper."""
+    built = []
+
+    class _Counted(ExportGate):
+        def __init__(self, *args, **kwargs):
+            built.append(self)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("superhumandoc_mcp.server.ExportGate", _Counted)
+    build_server(_config())
+    assert len(built) == 1

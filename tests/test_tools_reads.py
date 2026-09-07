@@ -16,7 +16,7 @@ from superhumandoc_mcp.schema_cache import ColumnCache
 from superhumandoc_mcp.server import build_server
 from superhumandoc_mcp.tools.reads import (
     OVERVIEW_INLINE_COLUMNS_MAX_TABLES,
-    _PageCache,
+    PageCache,
     describe_table,
     find_rows,
     get_doc_overview,
@@ -432,7 +432,7 @@ async def test_read_page_returns_the_page_as_html():
         _PageApi(content_type="canvas"),
         _fixed_downloader("<h1>Hi</h1>"),
         ExportGate(),
-        _PageCache(),
+        PageCache(),
         "page-x",
         clock=clock,
         sleep=sleep,
@@ -451,7 +451,7 @@ async def test_a_page_that_cannot_be_exported_is_refused_by_its_type(content_typ
             _PageApi(content_type=content_type),
             _fixed_downloader("x"),
             ExportGate(),
-            _PageCache(),
+            PageCache(),
             "page-x",
             clock=clock,
             sleep=sleep,
@@ -465,7 +465,7 @@ async def test_an_unchanged_page_is_not_exported_twice():
     one cheap page read."""
     clock, _, sleep = _fixtures()
     api = _PageApi(content_type="canvas", updated_at="2026-09-07T10:00:00Z")
-    cache, downloader = _PageCache(), _counting_downloader("<p>x</p>")
+    cache, downloader = PageCache(), _counting_downloader("<p>x</p>")
     for _ in range(2):
         await read_page(
             api, downloader, ExportGate(), cache, "page-x", clock=clock, sleep=sleep
@@ -478,7 +478,7 @@ async def test_a_changed_page_is_exported_again():
     saves -- it would report the document as it was and give no sign of it."""
     clock, _, sleep = _fixtures()
     api = _PageApi(content_type="canvas", updated_at="2026-09-07T10:00:00Z")
-    cache, downloader = _PageCache(), _counting_downloader("<p>x</p>")
+    cache, downloader = PageCache(), _counting_downloader("<p>x</p>")
     await read_page(
         api, downloader, ExportGate(), cache, "page-x", clock=clock, sleep=sleep
     )
@@ -497,7 +497,7 @@ async def test_two_pages_sharing_a_timestamp_do_not_share_a_render():
     edit or a duplicated template."""
     clock, _, sleep = _fixtures()
     stamp = "2026-09-07T10:00:00Z"
-    cache = _PageCache()
+    cache = PageCache()
     a = await read_page(
         _PageApi(content_type="canvas", updated_at=stamp),
         _fixed_downloader("<p>A</p>"),
@@ -525,7 +525,7 @@ async def test_a_page_with_no_timestamp_is_not_cached():
     only safe answer is to export again."""
     clock, _, sleep = _fixtures()
     api = _PageApi(content_type="canvas", updated_at=None)
-    cache, downloader = _PageCache(), _counting_downloader("<p>x</p>")
+    cache, downloader = PageCache(), _counting_downloader("<p>x</p>")
     for _ in range(2):
         await read_page(
             api, downloader, ExportGate(), cache, "page-x", clock=clock, sleep=sleep
@@ -544,7 +544,7 @@ async def test_the_export_runs_inside_the_gate():
         _PageApi(content_type="canvas"),
         _fixed_downloader("x"),
         gate,
-        _PageCache(),
+        PageCache(),
         "page-x",
         clock=clock,
         sleep=sleep,
