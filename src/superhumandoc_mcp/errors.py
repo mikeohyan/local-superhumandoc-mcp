@@ -98,3 +98,13 @@ class ResponseUnusable(ClientError):
             f"{operation}: the API returned a success status with a body this "
             "client could not read."
         )
+
+
+class ContentRefused(ClientError):
+    """Page content or cell values that a write cannot carry.
+
+    Raised before sending a request, so the caller learns why before the API
+    accepts it and discards the value. Page content and cell values raise this
+    one type rather than two, because both are the same refusal — the caller
+    supplied something a write cannot carry.
+    """
