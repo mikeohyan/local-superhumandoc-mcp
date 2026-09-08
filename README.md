@@ -9,13 +9,12 @@ and supplies its own credentials through a local `.env`.
 and config resolution, the HTTP client with its throttling, retry and
 failure-classification policy, the server factory, and the tool surface —
 decided by the `tool-surface` and `request-sizing` topics — are all
-implemented and tested. A client that
-connects finds twelve always-on tools: `outline_page`, `describe_table`,
-`get_doc_overview`, `get_row`, `find_rows`, `read_page`, `create_page`,
-`append_to_page`, `rename_page`, `replace_element`, `update_row`,
-`upsert_rows`. Six more — `delete_page`, `clear_page_content`,
-`overwrite_page`, `delete_element`, `delete_rows`, `push_button` — register
-only when `SHDOC_ALLOW_DESTRUCTIVE` is enabled.
+implemented and tested. A client that connects finds twelve always-on tools:
+`outline_page`, `describe_table`, `get_doc_overview`, `get_row`, `find_rows`,
+`read_page`, `create_page`, `append_to_page`, `rename_page`,
+`replace_element`, `update_row`, `upsert_rows`. Six more — `delete_page`,
+`clear_page_content`, `overwrite_page`, `delete_element`, `delete_rows`,
+`push_button` — register only when `SHDOC_ALLOW_DESTRUCTIVE` is enabled.
 
 ## Setup
 
@@ -48,7 +47,7 @@ project that *uses* it is below.
 
 **Not yet installable** — the package builds and the console script serves MCP
 over stdio, registering the full tool surface described above. The `@v0.1.0`
-in the example below is also not yet reachable: this repository carries no
+in the example below is not yet reachable: this repository carries no
 version tag, and the pinned-tag install was verified against a scratch copy
 rather than against this one. What follows is the shape decided by the
 `config-resolution` and `packaging` topics, and the one operational
