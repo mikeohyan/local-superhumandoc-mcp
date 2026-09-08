@@ -2,11 +2,18 @@
 
 **Date:** 2026-09-08
 **Target:** the 18 tools registered by `superhumandoc_mcp.server.build_server`, driven through an in-process `mcp.Client` against the live API
-**Status:** RUN on 2026-09-08. L0, L1, L2 and L3 all passed in full. L4 passed
-four of its five checks; L4b (`clear_page_content`) failed. `push_button` was
-deliberately not run, per "Before you run this" above. The Results section
-below carries the raw output of that run. An empty slot there means untested —
-it does not mean the test ran clean.
+**Status:** RUN TWICE on 2026-09-08, against the same scratch doc. First run:
+L0, L1, L2 and L3 all passed in full; L4 passed four of its five checks, with
+L4b (`clear_page_content`) failing against the pass condition as originally
+written. That run's findings prompted two fixes — `clear_page_content`'s tool
+description and `create_page`/`upsert_rows` id reporting — recorded under
+"What this run changed" below. Second run, after both fixes: 35 PASS, 0 FAIL,
+1 SKIP of 36 checks. L4b now passes, against a pass condition corrected to
+match the API's measured behaviour rather than a changed tool; three checks
+were added to confirm the id-reporting fixes live. `push_button` was
+deliberately not run in either run, per "Before you run this" above. The
+Results section below carries the raw output of both runs, clearly labelled.
+An empty slot there means untested — it does not mean the test ran clean.
 
 ## What this plan settles
 
@@ -744,12 +751,146 @@ Two consequences worth recording:
 The test's pass condition — an empty outline after clearing — was wrong, not
 the tool.
 
+## Second run — 2026-09-08
+
+After the first run's findings prompted the two fixes below, the identical
+plan was run a second time, same day, against the same scratch doc.
+
+**Run date:** 2026-09-08 (same day as the first run, after both fixes below
+had been made).
+**Doc used:** `6vqpBu-VYd`, same scratch doc as the first run.
+**Driver totals:** 45 tool calls, 416.9s elapsed, 35 PASS / 0 FAIL / 1 SKIP of
+36 checks.
+
+```
+==============================================================================
+SUMMARY
+==============================================================================
+  ID     STATUS  DESCRIPTION
+  ------ ------- ---------------------------------------------------
+  L0a    PASS    flag off registers exactly the 12 always-on tools
+  L0b    PASS    flag on registers exactly 18 tools (12 + 6 gated)
+  L1a    PASS    get_doc_overview returns pages + tables + columns
+  L1b    PASS    outline_page on TORTURE-MD
+  L1c    PASS    describe_table on grid-PH5-RNMCB1
+  L1d    PASS    find_rows shape is {rows, complete, note}
+  L1e    PASS    get_row returns name-keyed cells
+  L1f    PASS    read_page is cached on the second call
+  L1g    PASS    read_page refuses a contentType=table page
+  L2d    PASS    delete_element refuses on a page that owns a table
+  L2c    PASS    overwrite_page refuses a page that owns a table
+  L2b    PASS    clear_page_content refuses a page that owns a table
+  L2a    PASS    delete_page refuses a page that owns a table
+  L2e    PASS    TORTURE-MD is byte-for-byte unchanged
+  L3a    PASS    create_page applies
+  L3a3   PASS    create_page returns the new page's id
+  L3a2   PASS    resolve the created page's id
+  L3a4   PASS    create_page's id is the page that was created
+  L3b    PASS    rename_page applies and is visible
+  L3c    PASS    append_to_page (append) applies
+  L3d    PASS    append_to_page (prepend) applies
+  L3e    PASS    prepend/append land in the right order
+  L3f    PASS    replace_element rewrites one line
+  L3g    PASS    upsert_rows reports one outcome per row
+  L3g2   PASS    the upserted rows become visible
+  L3h    PASS    a repeated keyed upsert updates, not duplicates
+  L3g3   PASS    an unkeyed upsert reports the inserted row id
+  L3i    PASS    update_row writes a typed cell
+  L3j    PASS    update_row refuses a calculated column
+  L3k    PASS    update_row refuses an unknown column
+  L4a    PASS    delete_element on the created page
+  L4b    PASS    clear_page_content leaves one empty line
+  L4c    PASS    overwrite_page with force=True on the created page
+  L4d    PASS    delete_rows removes the rows this run inserted
+  L4e    PASS    delete_page on the created page
+  L4f    SKIP    push_button
+
+  PASS 35   FAIL 0   SKIP 1   (of 36 checks)
+
+  tool calls made: 45
+  elapsed: 416.9s
+```
+
+The created page this run acted on was `canvas-c3SJnaSjp0`. The cleanup audit
+at the end of the run confirmed it left nothing behind:
+
+```
+==============================================================================
+CLEANUP AUDIT — what this run left behind
+==============================================================================
+  page : gone  (canvas-c3SJnaSjp0)
+  rows : gone  (no row named live-A-20260908T042745Z, live-B-20260908T042745Z or live-C-20260908T042745Z in grid-PH5-RNMCB1)
+
+  Clean: this run left nothing behind.
+```
+
+`push_button` (L4f) is still the only SKIP, for the same unchanged reason
+stated in "Before you run this" above: `test-table-02`'s button column has an
+action nobody has recorded, and its blast radius cannot be stated in advance.
+
+### Three checks were added, because the tools gained fields since the first run
+
+- **L3a3** — asserts `create_page` returns a non-null `page_id` on an applied
+  create, closing the ergonomic gap the first run found (see "What this run
+  changed" below). Evidence:
+
+  ```
+  {'outcome': 'applied', 'detail': 'applied', 'warning': None, 'page_id': 'canvas-c3SJnaSjp0'}
+  ```
+
+- **L3a4** — asserts the id `create_page` reported names the *same* page a
+  listing finds by the name that was given to `create_page`, not merely that
+  some id came back. This matters on its own: a `page_id` that named the
+  wrong page would be worse than no id at all, because every later call in
+  the run would address the wrong page while still reporting success — the
+  failure would surface somewhere else entirely, if it surfaced at all.
+  Evidence: `reported canvas-c3SJnaSjp0, listing agrees`.
+
+- **L3g3** — asserts an *unkeyed* `upsert_rows` call reports the inserted row
+  id, and that the id reads back as the row just written. This needed its
+  own check because L3g exercises `upsert_rows` with `key_columns` set, and
+  in that keyed mode the API reports no row ids at all — so L3g can only ever
+  prove `row_id` comes back `None`. The populated half of the id-reporting
+  fix (the unkeyed path, where ids are actually returned) had no check
+  proving it worked until L3g3. Evidence: `row_id=i-VSWJT3XDri and get_row
+  under it returns the row just written`.
+
+### One check's pass condition changed: L4b
+
+The first run's L4b failed while waiting for `clear_page_content` to leave an
+empty outline. That run's own follow-up probe (see L4b above) established
+what the API actually does: it leaves exactly one line behind, keeping the
+first element's id and style with the text emptied — not a genuinely empty
+canvas. L4b's assertion now checks for that measured behaviour instead of an
+empty outline, and passes:
+
+```
+one line, text empty, after 0s: [{'element_id': 'cl-JshtOje6-u', 'style': 'h1', 'level': None, 'text': ''}]
+```
+
+To be explicit about what changed and why: the original expectation was wrong
+about the API, not about the tool, so the fix was to the test's pass
+condition, not to `clear_page_content` itself. The new assertion is also
+stricter than a bare "not empty" check would be — it pins exactly one line
+with empty text, so it would still fail against a future change either to a
+genuinely empty page or to a clear that leaves two lines behind.
+
+### L3g's own assertion was also tightened
+
+Independent of L3g3 above, the per-row key set L3g checks against was
+tightened to exactly `{index, outcome, warning, row_id}`. On a *keyed*
+upsert, `row_id` must now be present and `None` — not missing from the dict,
+and not a fabricated id — matching the present-but-null convention the fix
+established (see "What this run changed" below).
+
 ## What this run changed
 
 - `clear_page_content`'s tool description overstated the API's behaviour
   ("delete every element of a page's canvas") and has since been corrected
   to record the measured one-line survivor (see L4b above; also recorded
-  in `docs/reference/api-operational-constants.md`).
+  in `docs/reference/api-operational-constants.md`). **Confirmed live** by
+  the second run's L4b, which now passes against the corrected pass
+  condition — see "Second run — 2026-09-08" above.
 - `create_page` returning no id for the page it just created was an
   ergonomic gap; it has since been **fixed**. A live probe against scratch
   doc `6vqpBu-VYd` showed the 202 body already carries the id alongside
@@ -821,6 +962,12 @@ the tool.
   no RFC specifies the write tools' return shape. See
   `docs/reference/api-operational-constants.md` for the underlying
   measurement.
+
+  Both id-reporting fixes are **confirmed live** by the second run: L3a3 and
+  L3a4 exercise `create_page`'s new `page_id`, and L3g3 exercises the
+  unkeyed-upsert half of `upsert_rows`'s new `row_id` (L3g's own keyed case
+  can only ever show `row_id` as `None`). See "Second run — 2026-09-08"
+  above for the evidence each check produced.
 - Three things remain untested after this run, each for a stated reason
   rather than an oversight:
   - `push_button` — `test-table-02`'s button column has an action nobody has
