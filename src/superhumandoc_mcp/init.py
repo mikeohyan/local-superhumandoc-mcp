@@ -5,6 +5,7 @@ The rules here are set by the `project-setup` topic; see `_rfc/README.md`.
 """
 
 import re
+from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
@@ -83,3 +84,72 @@ def key_present(text: str, key: str) -> bool:
     """
     pattern = re.compile(rf"^[ \t]*#?[ \t]*{re.escape(key)}[ \t]*=", re.MULTILINE)
     return pattern.search(text) is not None
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """What happened to one artifact, and the line that reports it."""
+
+    artifact: str
+    action: str
+    detail: str = ""
+    stanza: str = ""
+
+    @property
+    def line(self) -> str:
+        if self.detail:
+            return f"{self.action} {self.artifact}: {self.detail}"
+        return f"{self.action} {self.artifact}"
+
+    @property
+    def failed(self) -> bool:
+        return self.action == "failed"
+
+
+def _append(path: Path, block: str) -> None:
+    """Append a block, guaranteeing it starts on a line of its own.
+
+    A file whose last line carries no trailing newline would otherwise have the
+    first appended line welded onto it, silently producing a key nothing reads.
+    A blank line separates the addition from whatever the project already had,
+    so the result reads as an addition rather than as an edit.
+    """
+    existing = path.read_text(encoding="utf-8")
+    prefix = ""
+    if existing and not existing.endswith("\n"):
+        prefix += "\n"
+    if existing.strip():
+        prefix += "\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(prefix + block.rstrip("\n") + "\n")
+
+
+def scaffold_env(cwd: Path) -> Outcome:
+    """Create `.env` from the template, or append only the keys it lacks.
+
+    Appending overwrites nothing, so it satisfies "never overwrite a byte this
+    command did not write" as completely as refusing would, and leaves the user
+    better off. A `.env` holding credentials for something else entirely is
+    safe: `load_config` consults only `SHDOC_`-prefixed keys, so everything
+    else in the file is inert to this server and untouched here.
+    """
+    path = cwd / ".env"
+    template = template_text()
+    if not path.exists():
+        path.write_text(template, encoding="utf-8")
+        # POSIX only in effect: on Windows `chmod` clears the read-only
+        # attribute and buys no confidentiality. This file holds a bearer token.
+        path.chmod(0o600)
+        return Outcome(".env", "wrote")
+
+    existing = path.read_text(encoding="utf-8")
+    missing = [
+        block for key, block in template_blocks(template)
+        if not key_present(existing, key)
+    ]
+    if not missing:
+        return Outcome(".env", "skipped", "already exists")
+    _append(path, "\n\n".join(missing))
+    # The mode of a file this command did not create stays the project's.
+    count = len(missing)
+    return Outcome(".env", "appended", f"{count} key{'' if count == 1 else 's'} added")
