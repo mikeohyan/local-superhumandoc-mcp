@@ -87,12 +87,20 @@ def test_configure_logging_does_not_propagate_to_root():
     """The regression this fix exists to prevent: without `propagate = False`,
     records emitted on the `superhumandoc_mcp` logger also reach root's own
     handlers, and the earlier httpx-noise regression returns.
+
+    A mutant that instead wipes root's own handlers (`logging.getLogger().
+    handlers = []`) would also make the record-count assertion pass, but at a
+    worse cost: it silences whatever logging the host process configured on
+    root. Asserting the recorder is still attached to root after the call
+    proves `_configure_logging` left root's handler list alone, which rules
+    that mutant out.
     """
     root = logging.getLogger()
     recorder = _Recorder()
     root.addHandler(recorder)
     try:
         _configure_logging(_config("DEBUG"))
+        assert recorder in root.handlers
         logging.getLogger(_LOGGER_NAME).debug("should not reach root")
         assert recorder.records == []
     finally:

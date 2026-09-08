@@ -166,3 +166,26 @@ def test_whitespace_only_log_level_falls_back_to_info(tmp_path):
     env.write_text("SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\n")
     config = load_config(str(env), {"SHDOC_LOG_LEVEL": "   "}, tmp_path)
     assert config.log_level == "INFO"
+
+
+def test_environment_log_level_wins_over_the_file(tmp_path):
+    """SHDOC_LOG_LEVEL follows the same environment-over-file precedence as
+    every other non-flag key. Both values are valid and distinct so the
+    assertion cannot pass by way of the INFO fallback."""
+    env = tmp_path / ".env"
+    env.write_text("SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\nSHDOC_LOG_LEVEL=WARNING\n")
+    config = load_config(str(env), {"SHDOC_LOG_LEVEL": "DEBUG"}, tmp_path)
+    assert config.log_level == "DEBUG"
+    assert config.sources["SHDOC_LOG_LEVEL"] == "environment"
+
+
+def test_missing_required_key_is_reported_before_a_bad_log_level(tmp_path):
+    """A user with no credentials configured should be told that, not sent
+    chasing a logging typo. SHDOC_DOC_ID is missing and SHDOC_LOG_LEVEL is
+    invalid at once; the missing key must be the one named."""
+    env = tmp_path / ".env"
+    env.write_text("SHDOC_API_KEY=k\nSHDOC_LOG_LEVEL=chatty\n")
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(str(env), {}, tmp_path)
+    assert "SHDOC_DOC_ID" in str(excinfo.value)
+    assert "chatty" not in str(excinfo.value)
