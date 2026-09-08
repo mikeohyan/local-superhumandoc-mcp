@@ -45,14 +45,29 @@ project that *uses* it is below.
 
 ## Installing in a project
 
-**Ready to install.** The package builds and the console script serves MCP
-over stdio, registering the full tool surface described above. The `@v0.1.0`
-in the example below names this repository's first tagged release, and the
-pinned-tag install has been exercised against this remote. What follows is
-the shape decided by the `config-resolution` and `packaging` topics, and the
-one operational requirement that is easy to get wrong.
+Run this once in the project directory:
 
-A consuming project commits a `.mcp.json` carrying no secrets:
+```bash
+uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.2.0 \
+  superhumandoc-mcp init
+```
+
+It writes three files and reports on each: a `.mcp.json` registering this
+server, a `.env` skeleton at mode `600` waiting for your token and document ID,
+and a `.env` line in `.gitignore`. Fill in the two values, then launch `claude`
+from that directory.
+
+**`init` never overwrites anything, and each file is decided on its own.** A
+file that is missing gets created. A `.env` that already exists — because the
+project holds other credentials, or because an earlier run stopped halfway —
+keeps every byte it has and gains only the `SHDOC_` keys it was missing,
+appended at the end with their explanatory comments. An existing `.mcp.json` is
+left exactly as it is, because adding a key to a JSON document means rewriting
+all of it; `init` prints the stanza to paste under `mcpServers` instead. So it
+is safe to re-run: a directory that is already set up reports three skips and
+exits 0.
+
+The registration `init` writes:
 
 ```json
 {
@@ -62,7 +77,7 @@ A consuming project commits a `.mcp.json` carrying no secrets:
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.1.0",
+        "git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.2.0",
         "superhumandoc-mcp"
       ]
     }
@@ -70,9 +85,18 @@ A consuming project commits a `.mcp.json` carrying no secrets:
 }
 ```
 
-Beside it sits a gitignored `.env` holding `SHDOC_API_KEY` and `SHDOC_DOC_ID`,
-plus the optional keys documented in [`.env.example`](.env.example), which is
-the list to read rather than this paragraph.
+It carries no secret and no `env` block — the server resolves credentials
+itself, which is what the `config-resolution` topic decides. The pin names a
+tagged release rather than a branch, as the `packaging` topic requires, and
+`init` writes the version that scaffolded the project, so a project stays on
+the exact server it was set up with until someone changes that line. The shape
+of the command and its collision rules are set by the `project-setup` topic.
+
+The `.env` beside it holds `SHDOC_API_KEY` and `SHDOC_DOC_ID`, plus the
+optional keys documented in [`.env.example`](.env.example) — which `init`
+copies in full, so the file it leaves in your project is the list to read
+rather than this paragraph.
+
 Scope the API token to that single document when you create it: the server is
 bound to one document anyway, and a workspace-wide token would give every
 project's server access to every other project's documents. Give it write
