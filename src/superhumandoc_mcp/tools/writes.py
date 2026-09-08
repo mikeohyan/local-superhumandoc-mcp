@@ -720,7 +720,7 @@ def register_write_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) ->
         content: str | None = None,
         subtitle: str | None = None,
         parent_page_id: str | None = None,
-    ) -> dict:
+    ) -> dict[str, object]:
         return await create_page(
             api, name, content, subtitle=subtitle, parent_page_id=parent_page_id
         )
@@ -729,24 +729,24 @@ def register_write_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) ->
     @tool_boundary
     async def append_to_page_tool(
         page_id_or_name: str, content: str, position: str = "append"
-    ) -> dict:
+    ) -> dict[str, object]:
         return await append_to_page(api, page_id_or_name, content, position=position)
 
     @server.tool(name="rename_page", description=_RENAME_PAGE_DESCRIPTION)
     @tool_boundary
-    async def rename_page_tool(page_id_or_name: str, name: str) -> dict:
+    async def rename_page_tool(page_id_or_name: str, name: str) -> dict[str, object]:
         return await rename_page(api, page_id_or_name, name)
 
     @server.tool(name="replace_element", description=_REPLACE_ELEMENT_DESCRIPTION)
     @tool_boundary
     async def replace_element_tool(
         page_id_or_name: str, element_id: str, content: str
-    ) -> dict:
+    ) -> dict[str, object]:
         return await replace_element(api, page_id_or_name, element_id, content)
 
     @server.tool(name="update_row", description=_UPDATE_ROW_DESCRIPTION)
     @tool_boundary
-    async def update_row_tool(table_id_or_name: str, row_id: str, cells: dict) -> dict:
+    async def update_row_tool(table_id_or_name: str, row_id: str, cells: dict) -> dict[str, object]:
         return await update_row(api, cache, table_id_or_name, row_id, cells)
 
     @server.tool(name="upsert_rows", description=_UPSERT_ROWS_DESCRIPTION)
@@ -755,7 +755,7 @@ def register_write_tools(server: MCPServer, api: DocsApi, cache: ColumnCache) ->
         table_id_or_name: str,
         rows: list[dict],
         key_columns: list[str] | None = None,
-    ) -> dict:
+    ) -> dict[str, object]:
         return await upsert_rows(
             api, cache, table_id_or_name, rows, key_columns=key_columns
         )
@@ -775,38 +775,38 @@ def register_gated_write_tools(server: MCPServer, api: DocsApi) -> None:
 
     @server.tool(name="delete_page", description=_DELETE_PAGE_DESCRIPTION)
     @tool_boundary
-    async def delete_page_tool(page_id_or_name: str, force: bool = False) -> dict:
+    async def delete_page_tool(page_id_or_name: str, force: bool = False) -> dict[str, object]:
         return await delete_page(api, page_id_or_name, force=force)
 
     @server.tool(
         name="clear_page_content", description=_CLEAR_PAGE_CONTENT_DESCRIPTION
     )
     @tool_boundary
-    async def clear_page_content_tool(page_id_or_name: str, force: bool = False) -> dict:
+    async def clear_page_content_tool(page_id_or_name: str, force: bool = False) -> dict[str, object]:
         return await clear_page_content(api, page_id_or_name, force=force)
 
     @server.tool(name="overwrite_page", description=_OVERWRITE_PAGE_DESCRIPTION)
     @tool_boundary
     async def overwrite_page_tool(
         page_id_or_name: str, content: str, force: bool = False
-    ) -> dict:
+    ) -> dict[str, object]:
         return await overwrite_page(api, page_id_or_name, content, force=force)
 
     @server.tool(name="delete_element", description=_DELETE_ELEMENT_DESCRIPTION)
     @tool_boundary
     async def delete_element_tool(
         page_id_or_name: str, element_id: str, force: bool = False
-    ) -> dict:
+    ) -> dict[str, object]:
         return await delete_element(api, page_id_or_name, element_id, force=force)
 
     @server.tool(name="delete_rows", description=_DELETE_ROWS_DESCRIPTION)
     @tool_boundary
-    async def delete_rows_tool(table_id_or_name: str, row_ids: list[str]) -> dict:
+    async def delete_rows_tool(table_id_or_name: str, row_ids: list[str]) -> dict[str, object]:
         return await delete_rows(api, table_id_or_name, row_ids)
 
     @server.tool(name="push_button", description=_PUSH_BUTTON_DESCRIPTION)
     @tool_boundary
     async def push_button_tool(
         table_id_or_name: str, row_id: str, column_id_or_name: str
-    ) -> dict:
+    ) -> dict[str, object]:
         return await push_button(api, table_id_or_name, row_id, column_id_or_name)

@@ -88,8 +88,9 @@ _READ_PAGE_DESCRIPTION = (
     "type found, before any export is attempted — a sync page is known to "
     "fail the export, and no other type has been tried. Rendered content is "
     "cached against the page's `updatedAt`, so re-reading an unchanged page "
-    "is cheap; a page that reports no `updatedAt` is not cached at all and "
-    "pays for a full export every time. Its output must not be sent "
+    "is cheap; a page that reports no `updatedAt`, or no `id`, is not "
+    "cached at all and pays for a full export every time. Its output "
+    "must not be sent "
     "back to create_page, append_to_page, replace_element, or any other "
     "write on this surface — writing a read back out is exactly the loop "
     "that compounds content loss on every pass."
@@ -294,10 +295,31 @@ class PageCache:
     does. Keeping every timestamp instead would grow a full HTML render per
     edit-then-read, for the life of the process.
 
-    A missing or null `updatedAt` is not a cache key at all: `get` always
-    misses and `set` is a no-op, because a render that cannot be
-    invalidated is worse than paying for another export.
+    Neither half is a cache key unless it is there: with no `page_id` or no
+    `updatedAt`, `get` always misses and `set` is a no-op. A render that
+    cannot be invalidated — which is what an entry filed under a stamp that
+    never changes is — is worse than paying for another export, and an entry
+    filed under a page that could not be identified is the wrong-page bug in
+    miniature, since two pages read under one name would share it.
+
+    `get` and `set` ask `is_keyable` rather than each testing the halves
+    themselves. Two copies of this rule is two things to keep in step, and
+    they fail asymmetrically: a `set` that has grown stricter than its `get`
+    only wastes an export, while a `get` that has grown stricter than its
+    `set` serves a render nothing can ever invalidate. One statement, asked
+    twice.
     """
+
+    @staticmethod
+    def is_keyable(page_id: str | None, updated_at: str | None) -> bool:
+        """Whether these two identify a cached render.
+
+        Falsiness, not `is None`. `""` is exactly as useless a key as `None`
+        is, and it is what this code is handed when the field is present and
+        empty; "missing" in the sentence above and the `or` `read_page`
+        applies to the id both mean the same thing.
+        """
+        return bool(page_id) and bool(updated_at)
 
     def __init__(self) -> None:
         self._entries: dict[str, tuple[str, str]] = {}
@@ -308,16 +330,16 @@ class PageCache:
         asserts — that is precisely how the unbounded version shipped."""
         return len(self._entries)
 
-    def get(self, page_id: str, updated_at: str | None) -> str | None:
-        if updated_at is None:
+    def get(self, page_id: str | None, updated_at: str | None) -> str | None:
+        if not self.is_keyable(page_id, updated_at):
             return None
         entry = self._entries.get(page_id)
         if entry is None or entry[0] != updated_at:
             return None
         return entry[1]
 
-    def set(self, page_id: str, updated_at: str | None, html: str) -> None:
-        if updated_at is None:
+    def set(self, page_id: str | None, updated_at: str | None, html: str) -> None:
+        if not self.is_keyable(page_id, updated_at):
             return
         self._entries[page_id] = (updated_at, html)
 
@@ -340,18 +362,35 @@ async def read_page(
     and a failed export. The same read's `updatedAt` is the cache key's
     other half, so an unchanged page never pays for a second export.
 
-    That read also answers the page's canonical `id`, and the cache key and
-    the gate key are both resolved to it rather than to whatever string the
-    caller used. A page is addressed as `pageIdOrName`, so a caller that
-    names one is doing the ordinary thing, and two callers naming one page
-    differently must still meet: keyed on the raw argument they take
-    different per-page gate slots and export at once, contending for the one
-    blob the gate exists to serialise, and they leave the cache holding two
-    entries for one page — which serves the wrong page's HTML as soon as a
-    name is moved to a different page that shares an `updatedAt`. This is
-    the pre-write guard's bug from the other side: `tools/guard.py` matches
-    a page reference on its name as well as its id; here the name is
-    resolved to the id.
+    That read also answers the page's canonical `id`, and everything after
+    it — the cache key, the gate key, and the export request itself — is
+    addressed to that id rather than to whatever string the caller used. A
+    page is addressed as `pageIdOrName`, so a caller that names one is doing
+    the ordinary thing, and two callers naming one page differently must
+    still meet: keyed on the raw argument they take different per-page gate
+    slots and export at once, contending for the one blob the gate exists to
+    serialise, and they leave the cache holding two entries for one page —
+    which serves the wrong page's HTML as soon as a name is moved to a
+    different page that shares an `updatedAt`. This is the pre-write guard's
+    bug from the other side: `tools/guard.py` matches a page reference on
+    its name as well as its id; here the name is resolved to the id.
+
+    Resolving the *keys* and then exporting the caller's string leaves the
+    same hole open, because the two can disagree between the `getPage` and
+    the kickoff: the name is moved to another page, the export renders that
+    other page, and its HTML is filed under this page's id and stamp, so the
+    next unchanged read of this page is answered with it. Both export hops
+    are page-scoped — the kickoff and the status `GET` that follows it — so
+    a rename mid-export would also send every poll to a page that no longer
+    has this request. `export_page` therefore names the id, and the caller's
+    own wording is put back into the failure message here, where it is a
+    label for a human rather than the address of a request.
+
+    The id is not always there. Where it is missing the gate falls back to
+    the caller's string — the worst that costs is serialising two readers
+    who need not have been — but the cache is skipped entirely, because an
+    entry filed under a name is shared by every page that name has ever
+    meant.
 
     The export itself runs inside `gate.for_page(...)`: exports of one page
     are serialised because the blob they render into is keyed by page and
@@ -376,12 +415,18 @@ async def read_page(
         )
 
     updated_at = page.get("updatedAt")
-    page_id = page.get("id") or page_id_or_name
+    # Two names because they fail differently. `page_id` is the canonical id
+    # or nothing, and is the cache key: a guess there is served back as this
+    # page's content. `export_target` is what the gate and the export are
+    # addressed to, and may fall back to the caller's string, because the
+    # worst a wrong guess costs there is a wait nobody needed.
+    page_id = page.get("id")
+    export_target = page_id or page_id_or_name
     cached = cache.get(page_id, updated_at)
     if cached is not None:
         return {"html": cached}
 
-    async with gate.for_page(page_id, deadline):
+    async with gate.for_page(export_target, deadline):
         # Looked up again now the gate is held, because the wait is exactly
         # when another reader of this page finishes and caches its render.
         # `updated_at` was read before the gate and is the same key it was
@@ -393,15 +438,26 @@ async def read_page(
         cached = cache.get(page_id, updated_at)
         if cached is not None:
             return {"html": cached}
-        html = await export_page(
-            api,
-            downloader,
-            page_id_or_name,
-            _READ_PAGE_OUTPUT_FORMAT,
-            deadline,
-            clock=clock,
-            sleep=sleep,
-        )
+        try:
+            html = await export_page(
+                api,
+                downloader,
+                export_target,
+                _READ_PAGE_OUTPUT_FORMAT,
+                deadline,
+                clock=clock,
+                sleep=sleep,
+            )
+        except ClientError as failure:
+            # `export_page` names the page it was handed, which is now an id
+            # the caller may never have seen. The wording it used is put
+            # back here rather than passed down, so that no part of the
+            # request is ever addressed to it.
+            if export_target == page_id_or_name:
+                raise
+            raise ClientError(
+                f"{failure} (read as {page_id_or_name!r})"
+            ) from failure
         # Inside the gate, so the render is visible to the next reader the
         # moment the slot it is waiting for is released.
         cache.set(page_id, updated_at, html)
@@ -452,12 +508,12 @@ def register_read_tools(
         name="get_doc_overview", description=_GET_DOC_OVERVIEW_DESCRIPTION
     )
     @tool_boundary
-    async def get_doc_overview_tool() -> dict:
+    async def get_doc_overview_tool() -> dict[str, object]:
         return await get_doc_overview(api, columns)
 
     @server.tool(name="get_row", description=_GET_ROW_DESCRIPTION)
     @tool_boundary
-    async def get_row_tool(table_id_or_name: str, row_id: str) -> dict:
+    async def get_row_tool(table_id_or_name: str, row_id: str) -> dict[str, object]:
         return await get_row(api, columns, table_id_or_name, row_id)
 
     @server.tool(name="find_rows", description=_FIND_ROWS_DESCRIPTION)
@@ -467,12 +523,12 @@ def register_read_tools(
         filters: dict[str, object] | None = None,
         sort: str | None = None,
         limit: int = 200,
-    ) -> dict:
+    ) -> dict[str, object]:
         return await find_rows(
             api, columns, table_id_or_name, filters=filters, sort=sort, limit=limit
         )
 
     @server.tool(name="read_page", description=_READ_PAGE_DESCRIPTION)
     @tool_boundary
-    async def read_page_tool(page_id_or_name: str) -> dict:
+    async def read_page_tool(page_id_or_name: str) -> dict[str, object]:
         return await read_page(api, downloader, gate, pages, page_id_or_name)

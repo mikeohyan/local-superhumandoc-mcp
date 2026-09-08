@@ -5,12 +5,14 @@ In-process, via `mcp.Client(server)` — no subprocess, no stdio. See
 path in `mcp` 2.x (`create_connected_server_and_client_session` is gone).
 """
 
+import time
 from pathlib import Path
 
 from mcp import Client
 
 from superhumandoc_mcp.api import Listing
 from superhumandoc_mcp.config import Config
+from superhumandoc_mcp.errors import ClientError
 from superhumandoc_mcp.gate import ExportGate
 from superhumandoc_mcp.server import build_server
 from superhumandoc_mcp.tools.reads import PageCache
@@ -117,9 +119,20 @@ async def test_one_export_gate_serves_the_whole_server(monkeypatch):
 # path a client takes.
 
 
-_EXPORTED_HTML = "<h1>stub</h1>"
 _STUB_PAGE_ID = "canvas-stub01"
+_STUB_TABLE_ID = "grid-stub01"
 _STUB_COLUMN = {"id": "c-stub01", "name": "Name", "format": {"type": "text"}}
+
+
+def _exported_html(page: str) -> str:
+    """What the stub renders for `page`.
+
+    The rendered body names the page the *export* was addressed to, not the
+    page the tool was called with, so a `read_page` that resolves the id for
+    its keys and then exports something else is visible in the content rather
+    than only in a spy.
+    """
+    return f"<h1>rendered {page}</h1>"
 
 
 class _StubApi:
@@ -131,6 +144,16 @@ class _StubApi:
     write methods take `*args, **kwargs` for the same reason: this stands in
     for eleven signatures and pinning each one here would make it a second
     copy of `api.py` to keep in step.
+
+    What it is *not* free to do is answer every argument alike. Six read
+    tools are exercised through this one double, and a double that ignores
+    which page, which table, which row or which filter it was asked about
+    cannot tell a correct delegation from a wrong one — a wrapper handing
+    another tool's arguments over, or calling another tool entirely, gets an
+    answer that looks right. So `get_page` refuses a page it does not know,
+    `get_row` answers under the id it was given, and `list_rows` holds two
+    rows so that a filter that is dropped on the way through is a different
+    answer rather than the same one.
     """
 
     _ACCEPTED = {"requestId": "request-stub01"}
@@ -157,9 +180,18 @@ class _StubApi:
         return {"id": row_id, "values": {_STUB_COLUMN["id"]: "Ada"}}
 
     async def list_rows(self, table, deadline, *, limit, params=None):
-        return Listing([{"id": "i-1", "values": {_STUB_COLUMN["id"]: "Ada"}}], True, None)
+        return Listing(
+            [
+                {"id": "i-1", "values": {_STUB_COLUMN["id"]: "Ada"}},
+                {"id": "i-2", "values": {_STUB_COLUMN["id"]: "Grace"}},
+            ],
+            True,
+            None,
+        )
 
     async def get_page(self, page, deadline):
+        if page != _STUB_PAGE_ID:
+            raise ClientError(f"this stub knows no page {page!r}")
         return {
             "id": _STUB_PAGE_ID,
             "contentType": "canvas",
@@ -170,7 +202,7 @@ class _StubApi:
         return {"id": "export-stub01"}
 
     async def get_export_status(self, page, request_id, deadline):
-        return {"downloadLink": "https://example.test/export-stub01"}
+        return {"downloadLink": f"https://example.test/{page}"}
 
     async def get_mutation_status(self, request_id, deadline):
         return {"completed": True}
@@ -202,14 +234,21 @@ class _StubApi:
 
 class _StubDownloader:
     """Stands in for `downloads.Downloader`: answers the export's download
-    hop from memory and counts how many times it was asked."""
+    hop from memory and counts how many times it was asked.
+
+    The body it returns is derived from the URL, which `_StubApi` derives
+    from the page the status hop was addressed to, so the HTML a caller ends
+    up with names the page that was actually exported.
+    """
+
+    _PREFIX = "https://example.test/"
 
     def __init__(self, *args, **kwargs) -> None:
         self.calls = 0
 
     async def fetch(self, url, deadline):
         self.calls += 1
-        return _EXPORTED_HTML
+        return _exported_html(url.removeprefix(self._PREFIX))
 
 
 # One call per registered tool, with arguments the stub above can answer.
@@ -218,10 +257,13 @@ class _StubDownloader:
 # quietly skipped.
 _ARGUMENTS_BY_TOOL = {
     "outline_page": {"page_id_or_name": _STUB_PAGE_ID},
-    "describe_table": {"table_id_or_name": "grid-stub01"},
+    "describe_table": {"table_id_or_name": _STUB_TABLE_ID},
     "get_doc_overview": {},
-    "get_row": {"table_id_or_name": "grid-stub01", "row_id": "i-1"},
-    "find_rows": {"table_id_or_name": "grid-stub01"},
+    "get_row": {"table_id_or_name": _STUB_TABLE_ID, "row_id": "i-1"},
+    # `filters` is passed rather than left to default, because a wrapper that
+    # drops it on the way through is otherwise the same call: with no filter
+    # asked for, forwarding `None` and forwarding the argument agree.
+    "find_rows": {"table_id_or_name": _STUB_TABLE_ID, "filters": {"Name": "Ada"}},
     "read_page": {"page_id_or_name": _STUB_PAGE_ID},
     "create_page": {"name": "Stub"},
     "append_to_page": {"page_id_or_name": _STUB_PAGE_ID, "content": "hello"},
@@ -241,29 +283,89 @@ _ARGUMENTS_BY_TOOL = {
     "clear_page_content": {"page_id_or_name": _STUB_PAGE_ID},
     "overwrite_page": {"page_id_or_name": _STUB_PAGE_ID, "content": "hello"},
     "delete_element": {"page_id_or_name": _STUB_PAGE_ID, "element_id": "el-1"},
-    "delete_rows": {"table_id_or_name": "grid-stub01", "row_ids": ["i-1"]},
+    "delete_rows": {"table_id_or_name": _STUB_TABLE_ID, "row_ids": ["i-1"]},
     "push_button": {
-        "table_id_or_name": "grid-stub01",
+        "table_id_or_name": _STUB_TABLE_ID,
         "row_id": "i-1",
         "column_id_or_name": "c-go",
     },
 }
 
 
+# What each read tool must answer, as the client receives it.
+#
+# `is_error is False` on its own says a tool ran, not that it ran the right
+# one: every read wrapper here delegates to a different function with a
+# different argument order, and seven separate ways of getting that wrong --
+# one tool delegating to another, an argument dropped, two arguments swapped,
+# a literal in place of the caller's, a return value wrapped or emptied --
+# all produced a green suite, because nothing downstream of the call ever
+# looked at what came back.
+#
+# Written as MCP *structured content*, which is what a tool's return value
+# becomes on the wire. Structured content is always an object, so a tool
+# annotated `-> list[dict]` has its list nested under `result` while a tool
+# annotated `-> dict[str, object]` is already an object and appears as
+# itself. That nesting is the SDK's, not the tool's, and it is spelled out
+# here rather than unwrapped by a helper, so that the two annotations stay
+# visibly different things.
+#
+# The write tools are absent on purpose. Their wrappers are annotated with a
+# bare `-> dict`, which pydantic cannot build a schema from, so the SDK gives
+# them no output schema and returns no structured content to compare -- the
+# same gap that let these seven mutations live. Tightening those annotations
+# belongs with `tools/writes.py`; until then a write tool is checked here for
+# `is_error` and for having answered at all.
+_EXPECTED_BY_TOOL = {
+    "outline_page": {
+        "result": [
+            {"element_id": "el-1", "style": "paragraph", "level": None, "text": "x"}
+        ]
+    },
+    "describe_table": {"result": [_STUB_COLUMN]},
+    "get_doc_overview": {"pages": [{"id": _STUB_PAGE_ID, "name": "Stub"}], "tables": []},
+    "get_row": {"row_id": "i-1", "cells": {"Name": "Ada"}},
+    "find_rows": {
+        "rows": [{"row_id": "i-1", "cells": {"Name": "Ada"}}],
+        "complete": True,
+        "note": None,
+    },
+    "read_page": {"html": _exported_html(_STUB_PAGE_ID)},
+}
+
+# The whole loop below, all eighteen tool calls, on the real clock. Every
+# sleep either tool wave can reach is monkeypatched to zero, so the only way
+# to spend a second here is for one of those sleeps to have stopped reading
+# the constant that is being zeroed -- which renames nothing and breaks
+# nothing and would otherwise be entirely silent. Deleting the two opening
+# sleeps alone takes this file from a tenth of a second to forty.
+_TOOL_CALL_BUDGET_S = 1.0
+
+
 def _stub_collaborators(monkeypatch, downloader_class=_StubDownloader):
     """Replace what `build_server` constructs with in-memory stands-in, and
-    take the two opening poll sleeps down to nothing.
+    take every sleep either poll loop can reach down to nothing.
 
-    Both sleeps are the modules' own constants, read at call time, so
-    zeroing them here keeps this suite on the real clock without any tool
-    having to accept a fake one — the registered wrappers deliberately
-    expose neither `clock` nor `sleep`, which is precisely the reason a test
-    that drives them through a client has to reach the constants instead.
+    All four are the modules' own constants, read at call time, so zeroing
+    them here keeps this suite on the real clock without any tool having to
+    accept a fake one — the registered wrappers deliberately expose neither
+    `clock` nor `sleep`, which is precisely the reason a test that drives
+    them through a client has to reach the constants instead.
+
+    The two *interval* constants are zeroed even though today's stubs answer
+    terminally on the first poll and never reach them. That is a property of
+    the stubs, not of the loops: a stub that one day needs a second poll —
+    to exercise the 404 grace window, say, or a re-minted download link —
+    would silently buy two real seconds per tool call, and would do it
+    without any assertion changing. Zeroing them costs nothing and removes
+    the trap; `_TOOL_CALL_BUDGET_S` is what notices if one is missed.
     """
     monkeypatch.setattr("superhumandoc_mcp.server.DocsApi", lambda *a, **k: _StubApi())
     monkeypatch.setattr("superhumandoc_mcp.server.Downloader", downloader_class)
     monkeypatch.setattr("superhumandoc_mcp.export.EXPORT_INITIAL_SLEEP_S", 0.0)
+    monkeypatch.setattr("superhumandoc_mcp.export.EXPORT_POLL_INTERVAL_S", 0.0)
     monkeypatch.setattr("superhumandoc_mcp.polling.MUTATION_INITIAL_SLEEP_S", 0.0)
+    monkeypatch.setattr("superhumandoc_mcp.polling.MUTATION_POLL_INTERVAL_S", 0.0)
 
 
 async def test_every_registered_tool_can_actually_be_called(monkeypatch) -> None:
@@ -274,15 +376,33 @@ async def test_every_registered_tool_can_actually_be_called(monkeypatch) -> None
     exercised by calling the delegate directly with hand-passed arguments —
     which is what every other tool test in this repository does. A mismatch
     there does not fail loudly: the model gets "Error executing tool <name>"
-    and never learns why, so `is_error` is the assertion and the tool's own
-    text is the failure message.
+    and never learns why, so `is_error` is the first assertion and the tool's
+    own text is its failure message.
+
+    `is_error` is not the last assertion, because it is not much of one. The
+    wrappers in `register_read_tools` are covered nowhere else — every other
+    read-tool test calls the delegate directly — and each of them is a line
+    that names a function and orders its arguments. Delegating to a
+    different tool, dropping a keyword argument, swapping two positional
+    ones, passing a literal, wrapping or emptying the return value: all of
+    them ran without error, so all of them shipped green. What came back is
+    therefore compared against `_EXPECTED_BY_TOOL`, tool by tool, against a
+    stub built to answer each tool distinguishably.
 
     The argument table is compared against `list_tools` as an exact set, so
     a tool added without a call here fails this rather than slipping past
     it.
+
+    The elapsed time is asserted for a different reason: `_stub_collaborators`
+    zeroes four sleep constants, and that only works while each is read as a
+    module global at call time. Nothing else would notice if one stopped
+    being — aliasing a constant into a default argument leaves the name in
+    place for the monkeypatch to find and the loop still sleeping the real
+    value — and the whole cost is wall-clock time nobody reads.
     """
     _stub_collaborators(monkeypatch)
     server = build_server(_config(allow_destructive=True))
+    started = time.monotonic()
     async with Client(server) as client:
         names = {tool.name for tool in (await client.list_tools()).tools}
         assert names == set(_ARGUMENTS_BY_TOOL), (
@@ -294,6 +414,19 @@ async def test_every_registered_tool_can_actually_be_called(monkeypatch) -> None
             assert result.is_error is False, (
                 f"{name} failed through the client: {result.content[0].text}"
             )
+            if name in _EXPECTED_BY_TOOL:
+                assert result.structured_content == _EXPECTED_BY_TOOL[name], (
+                    f"{name} answered something other than what it was asked "
+                    f"for: {result.structured_content!r}"
+                )
+            else:
+                assert result.content, f"{name} answered nothing at all"
+    elapsed = time.monotonic() - started
+    assert elapsed < _TOOL_CALL_BUDGET_S, (
+        f"calling every tool took {elapsed:.2f}s, which is time no stub here "
+        "spends: a sleep has stopped reading the constant _stub_collaborators "
+        "zeroes"
+    )
 
 
 async def test_the_collaborators_built_here_are_the_ones_read_page_uses(monkeypatch):

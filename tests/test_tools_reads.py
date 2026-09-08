@@ -25,7 +25,13 @@ from superhumandoc_mcp.tools.reads import (
     outline_page,
     read_page,
 )
-from tests.conftest import _config, _counting_downloader, _fixed_downloader, _fixtures
+from tests.conftest import (
+    _Downloads,
+    _config,
+    _counting_downloader,
+    _fixed_downloader,
+    _fixtures,
+)
 
 
 class _FakeApi:
@@ -407,6 +413,14 @@ class _PageApi:
     how a failed render is spelled to `export.py`; `export_formats` records
     what each kickoff was asked for, because nothing else pins the format
     the tool actually sends.
+
+    `export_pages` and `status_pages` record the page each hop was addressed
+    to. Both endpoints are page-scoped -- the kickoff is
+    `POST /docs/{doc}/pages/{page}/export` and the status `GET` repeats the
+    same `{page}` -- so a double that ignored its `page` argument would let a
+    `read_page` that resolves the id for its keys and then exports the
+    caller's raw string pass every other test here, which is exactly how that
+    shipped.
     """
 
     def __init__(
@@ -422,6 +436,8 @@ class _PageApi:
         self.page_id = page_id
         self.error = error
         self.export_formats: list[str] = []
+        self.export_pages: list[str] = []
+        self.status_pages: list[str] = []
         self._next_id = 0
 
     async def get_page(self, page: str, deadline: Deadline) -> dict:
@@ -433,12 +449,14 @@ class _PageApi:
 
     async def begin_export(self, page: str, output_format: str, deadline: Deadline) -> dict:
         self.export_formats.append(output_format)
+        self.export_pages.append(page)
         self._next_id += 1
         return {"id": f"export-{self._next_id}"}
 
     async def get_export_status(
         self, page: str, request_id: str, deadline: Deadline
     ) -> dict:
+        self.status_pages.append(page)
         if self.error is not None:
             return {"error": self.error}
         return {"downloadLink": f"https://example.test/{page}/{request_id}"}
@@ -677,6 +695,145 @@ async def test_a_name_moved_to_another_page_does_not_serve_the_first_ones_html()
     assert rendered == ["<p>A</p>", "<p>B</p>"]
 
 
+async def test_the_export_itself_is_requested_against_the_canonical_page_id():
+    """Resolving the id for the cache key and the gate key, and then exporting
+    the caller's raw string, closes nothing: the render that comes back is
+    whatever that string names *now*, and it is stored under the id resolved
+    a moment earlier. Both hops are page-scoped -- the kickoff
+    `POST /docs/{doc}/pages/{page}/export` and the status `GET` that repeats
+    the same `{page}` -- so both have to be addressed to the id, or a rename
+    mid-export also sends every poll to the wrong page."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at=_STAMP)
+    await read_page(
+        api, _fixed_downloader("x"), ExportGate(), PageCache(), "Q3 Plan",
+        clock=clock, sleep=sleep,
+    )
+    assert api.export_pages == [_PAGE_ID]
+    assert api.status_pages == [_PAGE_ID]
+
+
+async def test_a_name_moved_between_the_lookup_and_the_export_cannot_be_cached():
+    """The window the id keys were meant to close, stated as content rather
+    than as a key.
+
+    `getPage("Q3 Plan")` resolves page A; the name is then moved to page B.
+    An export addressed to the caller's string renders B, and the result is
+    filed under A's id and A's `updatedAt` -- so the next read of A, unchanged,
+    is served B's HTML with nothing anywhere to say so. Addressed to the id,
+    the export can only render A. The two renders are told apart by the
+    download URL, which carries the page the status hop was asked about."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at=_STAMP, page_id="canvas-aaa")
+    downloader = _Downloads(
+        bodies={
+            "https://example.test/canvas-aaa/export-1": "<p>A</p>",
+            "https://example.test/Q3 Plan/export-1": "<p>B</p>",
+        },
+        default="<p>some other page entirely</p>",
+    )
+    cache = PageCache()
+    result = await read_page(
+        api, downloader, ExportGate(), cache, "Q3 Plan", clock=clock, sleep=sleep
+    )
+    assert result["html"] == "<p>A</p>"
+    assert cache.get("canvas-aaa", _STAMP) == "<p>A</p>"
+
+
+async def test_a_failed_export_still_names_the_page_the_caller_asked_for():
+    """Addressing the export by id must not cost the caller the word it used.
+    `export.py` names the page it was handed, which is now an id the model may
+    never have seen; a model that asked for "Q3 Plan" has to be able to tell
+    that this failure is about the page it asked for."""
+    clock, _, sleep = _fixtures()
+    with pytest.raises(ClientError) as caught:
+        await read_page(
+            _PageApi(content_type="canvas", updated_at=_STAMP, error="render blew up"),
+            _fixed_downloader("x"),
+            ExportGate(),
+            PageCache(),
+            "Q3 Plan",
+            clock=clock,
+            sleep=sleep,
+        )
+    message = str(caught.value)
+    assert "render blew up" in message
+    assert "Q3 Plan" in message
+
+
+async def test_a_page_that_reports_no_id_is_not_cached():
+    """`page.get("id") or page_id_or_name` is a fair enough gate key -- the
+    worst it costs is a serialisation two readers did not need. As a *cache*
+    key it is the wrong-page bug again: two pages that both omit `id`, read
+    under one name and sharing a stamp, are one entry, and the second read is
+    served the first's HTML. A page with no id is not cached at all, the same
+    way a page with no `updatedAt` is not."""
+    clock, _, sleep = _fixtures()
+    cache = PageCache()
+    rendered = []
+    for html in ("<p>A</p>", "<p>B</p>"):
+        result = await read_page(
+            _PageApi(content_type="canvas", updated_at=_STAMP, page_id=None),
+            _fixed_downloader(html),
+            ExportGate(),
+            cache,
+            "Q3 Plan",
+            clock=clock,
+            sleep=sleep,
+        )
+        rendered.append(result["html"])
+    assert rendered == ["<p>A</p>", "<p>B</p>"]
+    assert len(cache) == 0
+
+
+def test_an_empty_timestamp_is_not_a_cache_key_either():
+    """`updated_at is None` lets `""` through, and an empty string is a key
+    that never changes -- so the entry it files can never be invalidated and
+    the page is answered from it for the life of the process. The docstring
+    says "missing"; falsiness is what that means, and it matches the `or` on
+    the id beside it."""
+    cache = PageCache()
+    cache.set("canvas-aaa", "", "<p>x</p>")
+    assert cache.get("canvas-aaa", "") is None
+    assert len(cache) == 0
+
+
+@pytest.mark.parametrize(
+    "page_id, updated_at, keyable",
+    [
+        ("canvas-aaa", _STAMP, True),
+        (None, _STAMP, False),
+        ("", _STAMP, False),
+        ("canvas-aaa", None, False),
+        ("canvas-aaa", "", False),
+    ],
+)
+def test_what_counts_as_a_cache_key_is_asked_once_and_answered_the_same_way(
+    page_id, updated_at, keyable
+):
+    """`get` and `set` share one predicate, so this pins it once instead of
+    twice. Testing it only through the pair hides half of it: `set` refuses
+    an unusable key, so nothing is ever filed under one, so `get`'s own guard
+    is unreachable through the pair and can be loosened back to `is None`
+    with the suite still green. Sharing the predicate is what makes that
+    loosening a single edit, and this is what fails on it."""
+    assert PageCache.is_keyable(page_id, updated_at) is keyable
+
+
+async def test_a_page_reporting_an_empty_timestamp_is_exported_every_time():
+    """The same fact where it bites: an empty `updatedAt` cannot be compared
+    against a later one, so a render filed under it would be served forever."""
+    clock, _, sleep = _fixtures()
+    api = _PageApi(content_type="canvas", updated_at="")
+    cache, downloader = PageCache(), _counting_downloader("<p>x</p>")
+    for _ in range(2):
+        await read_page(
+            api, downloader, ExportGate(), cache, _PAGE_ID, clock=clock, sleep=sleep
+        )
+    assert downloader.calls == 2
+    assert len(cache) == 0
+
+
 async def test_a_reader_that_waited_on_the_gate_takes_the_render_it_waited_for():
     """The cache is checked again after the gate is acquired, not only before
     it. Both readers miss on the way in; the second one blocks, and by the
@@ -686,7 +843,13 @@ async def test_a_reader_that_waited_on_the_gate_takes_the_render_it_waited_for()
     can fail with "did not complete within the export deadline" while the
     HTML it asked for is sitting in the cache. `updatedAt` was read before
     the gate and does not change while the reader waits, so the second look
-    uses the same key as the first."""
+    uses the same key as the first.
+
+    The join is bounded by `asyncio.wait_for`, the way every re-entry in
+    tests/test_gate.py already is. This is the one test in this module that
+    puts two tasks through a real `ExportGate`, so a lock that is acquired
+    and never released wedges it — and a bare `gather` waits for that
+    forever, which is a suite that hangs rather than a suite that fails."""
     clock, _, sleep = _fixtures()
     api = _BlockingPageApi(content_type="canvas", updated_at=_STAMP)
     gate, cache = ExportGate(), PageCache()
@@ -702,7 +865,7 @@ async def test_a_reader_that_waited_on_the_gate_takes_the_render_it_waited_for()
     second = start()
     await _settle()
     api.release.set()
-    a, b = await asyncio.gather(first, second)
+    a, b = await asyncio.wait_for(asyncio.gather(first, second), timeout=5.0)
     assert downloader.calls == 1
     assert a["html"] == b["html"] == "<p>x</p>"
 
