@@ -789,10 +789,38 @@ the tool.
   id is usable as soon as the outcome is `applied`. See
   `docs/reference/api-operational-constants.md` for the full measurement.
 
-  `upsert_rows` has the analogous gap still **open**. Its 202 body carries
-  `addedRowIds`, and the tool does not surface them, so a caller that
-  inserts rows still cannot address them without a follow-up `find_rows`.
-  Unfixed, and out of scope for this change.
+  `upsert_rows` had the analogous gap; it has since been **fixed**. Each
+  entry in `upsert_rows`' returned `rows` list now carries `row_id` alongside
+  `index`, `outcome` and `warning`. The id is mapped through the chunk's own
+  index list, not by position in the whole batch, because the alignment is
+  per request — past the first chunk those two disagree and the wrong one
+  would file every id against another row. It is only mapped when the count
+  of returned ids matches the count of rows in that chunk; if they ever
+  disagree, the correspondence is precisely what is unknown, so nothing is
+  guessed. `row_id` is always present and `None` when there is no id — the
+  same present-but-null convention `warning` and `create_page`'s `page_id`
+  follow.
+
+  It is `None` on every row of a KEYED upsert, even genuinely new rows,
+  because the API omits the field in that mode. This is the notable
+  finding: `key_columns` buys replay safety and costs you the inserted IDs;
+  omitting it returns the IDs and costs replay safety. The tool's
+  description now states this trade-off and recommends preferring
+  `key_columns` plus a follow-up `find_rows`, since a duplicated row is
+  harder to undo than a lookup is to repeat.
+
+  Live confirmation through the MCP boundary:
+
+  ```
+  A) unkeyed upsert: {'rows': [{'index': 0, 'outcome': 'applied', 'warning': None, 'row_id': 'i-eeJIT5_mco'}, {'index': 1, 'outcome': 'applied', 'warning': None, 'row_id': 'i-C2IM3hiL5c'}], 'chunks': 1, 'resume_from': None}
+     get_row on the returned id succeeded immediately.
+  B) keyed upsert:   {'rows': [{'index': 0, 'outcome': 'applied', 'warning': None, 'row_id': None}], 'chunks': 1, 'resume_from': None}
+  ```
+
+  This needed no RFC, for the same reason the `create_page` change did not:
+  no RFC specifies the write tools' return shape. See
+  `docs/reference/api-operational-constants.md` for the underlying
+  measurement.
 - Three things remain untested after this run, each for a stated reason
   rather than an oversight:
   - `push_button` — `test-table-02`'s button column has an action nobody has

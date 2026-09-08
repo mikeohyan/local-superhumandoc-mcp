@@ -595,6 +595,43 @@ The 202 body is `{"requestId": ..., "addedRowIds": [...]}`, so a newly inserted 
 is not anonymous — the caller gets its id back immediately, in request order, before
 the mutation completes.
 
+**`addedRowIds` only appears when `key_columns` is absent** [MEASURED 2026-09-08].
+Three live probes against scratch doc `6vqpBu-VYd`, table `grid-PH5-RNMCB1`,
+against `upsertRows`' 202 body:
+
+1. Two brand-new rows sent WITH `key_columns` — no `addedRowIds` field at all:
+   `{'requestId': 'mutate:821d57a5-d5ae-48ed-a913-4d6d2ca8fee7'}`
+2. The same two rows sent again WITH `key_columns` (an update) — again no
+   `addedRowIds`: `{'requestId': 'mutate:1a2b5890-aa88-45a3-9053-aebb2eae3d5f'}`
+3. One new row sent WITHOUT `key_columns` — the field appeared:
+   `{'requestId': 'mutate:daefc42c-0b24-47e5-83da-c0758decc2fe', 'addedRowIds':
+   ['i-vDO4Yu0Xfn']}`
+
+So the shape quoted above is conditional, not universal: `addedRowIds` is
+omitted entirely when `key_columns` is sent, even for rows that were
+genuinely inserted — probe 1 inserted two brand-new rows and still got
+nothing back.
+
+When it is present, it is index-aligned with the rows of that request. A
+fourth probe sent three distinguishable rows in one unkeyed request and
+resolved each returned id back to its row's `Name`:
+
+```
+sent, in order: ['align-1-041558', 'align-2-041558', 'align-3-041558']
+addedRowIds:    ['i-DA5X6oPvK1', 'i-j6U69P0z7U', 'i-C6jI_9YJU5']
+   addedRowIds[0] -> 'align-1-041558'   MATCH
+   addedRowIds[1] -> 'align-2-041558'   MATCH
+   addedRowIds[2] -> 'align-3-041558'   MATCH
+INDEX-ALIGNED: True
+```
+
+The consequence for a caller: the replay-safe mode (`key_columns`) and the
+mode that tells you what it inserted (`addedRowIds`) are mutually exclusive
+in this API. A caller that wants both must send `key_columns` and then
+locate the rows with a separate listing. See
+`docs/validation/2026-09-08-live-tool-surface.md` for the fix this drove in
+`upsert_rows`.
+
 **No maximum rows per upsert has ever been published.** [SPEC-VERIFIED] The entire
 spec contains **zero** `maxItems`, and no `maxLength` on any docs-domain schema —
 `RowsUpsert.rows`, `RowsDelete.rowIds`, and `PageContent.content` are all
@@ -1362,6 +1399,13 @@ above. That suggests the "202 carries only a `requestId`" reading of the
 eleven-operation list above is too narrow, and other operations in it may
 carry identities nobody has looked for yet — an open question, not a finding.
 Recorded in `docs/validation/2026-09-08-live-tool-surface.md`.
+
+`upsertRows` has since been examined in detail (see the `addedRowIds only
+appears when key_columns is absent` entry above): its identity reporting
+turns out to be conditional on `key_columns`, not merely present-or-absent
+the way `createPage`'s is. That sharpens but does not close the open
+question above — the remaining operations in the eleven-operation list still
+have not been looked at.
 
 **`contentUpdate` can be scoped to a single element, and element IDs survive
 the write** [probe B6, measured live 2026-09-07]. This was the open question

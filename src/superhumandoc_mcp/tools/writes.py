@@ -171,7 +171,18 @@ _UPSERT_ROWS_DESCRIPTION = (
     "back here as a write, since that round trip is what compounds content "
     "loss on every pass. Returns one entry per row given, in the order "
     "given, each carrying `index`, `outcome` (`applied`, `unknown`, "
-    "`refused`, or `not_attempted`) and `warning`; plus `chunks`, how many "
+    "`refused`, or `not_attempted`), `warning`, and `row_id` — the ID of the "
+    "row that was inserted, which is how a row written here is addressed "
+    "afterwards by update_row, get_row or delete_rows. Note the trade-off, "
+    "because it is real and cuts both ways: this API reports the IDs it "
+    "inserted only when `key_columns` is NOT sent, so `row_id` is null on "
+    "every row of a keyed upsert, even rows that were genuinely new. "
+    "Choosing `key_columns` buys replay safety and gives up knowing the "
+    "IDs; omitting it returns the IDs and gives up replay safety. When both "
+    "matter, prefer `key_columns` and find the rows afterwards with "
+    "find_rows — a duplicated row is harder to undo than a lookup is to "
+    "repeat. `row_id` is null too for any row refused or never attempted, "
+    "which have no ID because nothing was inserted. Plus `chunks`, how many "
     "requests the batch was split into, and `resume_from`, the index of the "
     "first row never attempted — re-call with `rows` sliced from there to "
     "resume a batch a deadline cut short. An unknown outcome may already "
@@ -553,6 +564,9 @@ async def upsert_rows(
     columns = await cache.columns(table_id_or_name, deadline)
     formatted_rows = [_cells_by_id(row, columns) for row in rows]
 
+    # Filled in by `send` below, keyed by the caller's own row index.
+    added_by_index: dict[int, str] = {}
+
     async def send(indices: list[int]) -> MutationOutcome:
         response = await api.upsert_rows(
             table_id_or_name,
@@ -560,6 +574,22 @@ async def upsert_rows(
             key_columns=key_columns,
             deadline=deadline,
         )
+        # `addedRowIds` is index-aligned with the rows of *this chunk*
+        # (measured 2026-09-08 over three rows), so it is mapped through
+        # `indices` rather than by position in the whole batch -- past the
+        # first chunk those two disagree, and using the wrong one would file
+        # every id against another row.
+        #
+        # Only when the lengths agree. The API omits the field outright when
+        # `key_columns` was sent, even for rows it genuinely inserted, so
+        # there is usually nothing to align; and if it ever comes back a
+        # different length than the chunk, its correspondence to the rows is
+        # exactly what is unknown, which is the one situation where guessing
+        # would file an id against a row that did not get it.
+        added = response.get("addedRowIds") or []
+        if len(added) == len(indices):
+            for position, row_id in enumerate(added):
+                added_by_index[indices[position]] = row_id
         return await _outcome(api, response, deadline, clock=clock, sleep=sleep)
 
     chunks = plan_chunks(
@@ -574,7 +604,11 @@ async def upsert_rows(
     report_dict = report.as_dict()
     return {
         "rows": [
-            {"index": index, **row} for index, row in enumerate(report_dict["rows"])
+            # `row_id` is always present and null when the API named no id,
+            # the same convention `warning` beside it follows: a shape that
+            # gained and lost keys would make a caller test for each one.
+            {"index": index, **row, "row_id": added_by_index.get(index)}
+            for index, row in enumerate(report_dict["rows"])
         ],
         "chunks": len(chunks),
         "resume_from": report.resume_from(),

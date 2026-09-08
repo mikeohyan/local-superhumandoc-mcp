@@ -299,6 +299,7 @@ class _RowApi:
         self._columns = columns if columns is not None else [_ROW_COLUMN]
         self._warn_on_request_id = warn_on_request_id
         self._next_id = 0
+        self._row_serial = 0
 
     def _new_request_id(self) -> str:
         self._next_id += 1
@@ -326,7 +327,17 @@ class _RowApi:
                 "key_columns": key_columns,
             }
         )
-        return {"requestId": self._new_request_id()}
+        body = {"requestId": self._new_request_id()}
+        # Faithful to the measured API (2026-09-08): `addedRowIds` comes back
+        # only when `key_columns` was NOT sent, and is then index-aligned with
+        # the rows of that chunk. With `key_columns` the field is absent
+        # outright, even for rows that were genuinely inserted.
+        if key_columns is None:
+            body["addedRowIds"] = [
+                f"i-added-{self._row_serial + n}" for n in range(len(rows))
+            ]
+            self._row_serial += len(rows)
+        return body
 
     async def get_mutation_status(self, request_id: str, deadline: Deadline) -> dict:
         if request_id == self._warn_on_request_id:
@@ -383,6 +394,54 @@ async def test_upsert_reports_every_row_it_was_given():
     clock, _, sleep = _fixtures()
     report = await upsert_rows(api, cache, "grid-x", _rows(3), clock=clock, sleep=sleep)
     assert len(report["rows"]) == 3
+
+
+async def test_upsert_reports_the_id_of_each_row_it_inserted():
+    """`addedRowIds` is index-aligned with the rows of the chunk that was
+    sent (measured 2026-09-08 over three rows), so each id can be reported
+    against the row that caused it rather than as an opaque list the caller
+    has to re-match by hand."""
+    api = _RowApi()
+    cache = ColumnCache(api)
+    clock, _, sleep = _fixtures()
+    report = await upsert_rows(api, cache, "grid-x", _rows(3), clock=clock, sleep=sleep)
+    assert [r["row_id"] for r in report["rows"]] == [
+        "i-added-0",
+        "i-added-1",
+        "i-added-2",
+    ]
+
+
+async def test_upsert_row_ids_stay_aligned_across_a_chunk_split():
+    """The alignment is per chunk, not per call: a batch split into three
+    requests must still report each row's own id against that row. Mapping
+    a chunk's ids onto the whole batch's indices would misattribute every
+    id after the first chunk."""
+    api = _RowApi()
+    cache = ColumnCache(api)
+    clock, _, sleep = _fixtures()
+    report = await upsert_rows(
+        api, cache, "grid-x", _rows(250), clock=clock, sleep=sleep
+    )
+    assert report["chunks"] == 3
+    ids = [r["row_id"] for r in report["rows"]]
+    assert ids == [f"i-added-{n}" for n in range(250)]
+    assert len(set(ids)) == 250, "an id was reported against more than one row"
+
+
+async def test_upsert_reports_no_row_id_when_key_columns_were_used():
+    """The API omits `addedRowIds` entirely when `key_columns` is sent --
+    even for rows it genuinely inserted (measured 2026-09-08). There is
+    nothing to report, and inventing an id would be worse than saying so,
+    so the key is present and null rather than guessed at."""
+    api = _RowApi()
+    cache = ColumnCache(api)
+    clock, _, sleep = _fixtures()
+    report = await upsert_rows(
+        api, cache, "grid-x", _rows(2), key_columns=["Name"], clock=clock, sleep=sleep
+    )
+    assert all("row_id" in r for r in report["rows"])
+    assert all(r["row_id"] is None for r in report["rows"])
 
 
 async def test_a_batch_over_the_count_cap_is_split_not_refused():
