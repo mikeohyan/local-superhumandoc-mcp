@@ -1256,6 +1256,30 @@ whole-page `replace` carrying an empty payload. The same endpoint also deletes
 named elements by ID, which is a narrower destructive primitive than a
 whole-page write.
 
+[MEASURED 2026-09-08] **"Delete all content" leaves one line behind, and that
+line keeps the first element's id and style.** A canvas page holding an `h1`
+"one" and two paragraphs "two"/"three" was cleared through
+`superhumandoc_mcp.tools.writes.clear_page_content`, which reported
+`{"outcome": "applied"}`. Five seconds later the page held not zero elements
+but one:
+
+```
+BEFORE  cl-e1wZWp-VdR  h1         'one'
+        cl-lLCCpLOk8S  paragraph  'two'
+        cl-J6DVMo7kNE  paragraph  'three'
+AFTER   cl-e1wZWp-VdR  h1         ''
+```
+
+The survivor is not a fresh empty paragraph: it is the *first* element,
+retaining both its id `cl-e1wZWp-VdR` and its `h1` style, with `content`
+emptied to the empty string. Two consequences a caller must plan for. A cleared
+page is **not** an empty page, so code that waits for an empty content listing
+after a clear waits forever — this is what the live validation run's L4b check
+did before it was understood. And content appended to a freshly cleared page
+follows a surviving styled line rather than starting clean, so a page cleared
+and then rewritten inherits the heading style of whatever used to be at the
+top. Recorded in `docs/validation/2026-09-08-live-tool-surface.md`.
+
 **What `whoami` reveals about a token** [SPEC-VERIFIED and live-confirmed,
 2026-09-04]. `GET /whoami` returns a `User` whose properties are `href`,
 `loginId`, `name`, `pictureLink`, `scoped`, `tokenName`, `type`, `workspace`.

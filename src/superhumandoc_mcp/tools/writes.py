@@ -182,10 +182,14 @@ _DELETE_PAGE_DESCRIPTION = (
 )
 
 _CLEAR_PAGE_CONTENT_DESCRIPTION = (
-    "Delete every element of a page's canvas, leaving the page itself — its "
-    "name, its position in the page tree — in place. This is a distinct "
-    "API operation from replacing the page, not a whole-page write carrying "
-    "an empty body. Before clearing, this checks whether the page owns any "
+    "Clear a page's canvas, leaving the page itself — its name, its position "
+    "in the page tree — in place. This is a distinct API operation from "
+    "replacing the page, not a whole-page write carrying an empty body. It "
+    "does not leave the page empty: measured behaviour is that exactly one "
+    "line survives, keeping the first element's ID and its style with the "
+    "text emptied, so a cleared page still reads as one blank styled line and "
+    "content added afterwards follows it rather than starting clean. "
+    "Before clearing, this checks whether the page owns any "
     "table, control or formula chip — objects `outline_page` cannot see, "
     "because they never appear in a page's content listing — and refuses, "
     "naming what it found, rather than destroy them unseen. Pass "
