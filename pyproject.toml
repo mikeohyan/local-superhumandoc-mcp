@@ -19,6 +19,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/superhumandoc_mcp"]
 
+[tool.hatch.build.targets.wheel.force-include]
+".env.example" = "superhumandoc_mcp/templates/env.example"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
