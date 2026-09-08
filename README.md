@@ -5,10 +5,11 @@ Claude and Claude Code. Written in Python, managed with `uv`, and intended to be
 set up per project folder: each project points the server at its own document
 and supplies its own credentials through a local `.env`.
 
-**Status: the server is fully built.** Credential and config resolution, the
-HTTP client with its throttling, retry and failure-classification policy, the
-server factory, and the tool surface — decided by the `tool-surface` and
-`request-sizing` topics — are all implemented and tested. A client that
+**Status: the server is built, and its tool surface is complete.** Credential
+and config resolution, the HTTP client with its throttling, retry and
+failure-classification policy, the server factory, and the tool surface —
+decided by the `tool-surface` and `request-sizing` topics — are all
+implemented and tested. A client that
 connects finds twelve always-on tools: `outline_page`, `describe_table`,
 `get_doc_overview`, `get_row`, `find_rows`, `read_page`, `create_page`,
 `append_to_page`, `rename_page`, `replace_element`, `update_row`,
@@ -45,13 +46,13 @@ project that *uses* it is below.
 
 ## Installing in a project
 
-**Not yet useful** — the package builds and the console script serves MCP over
-stdio, but the server registers no tools until the `tool-surface` topic ships,
-so there is nothing for a model to call. The `@v0.1.0` in the example below is
-also not yet reachable: this repository carries no version tag, and the pinned-tag
-install was verified against a scratch copy rather than against this one. What
-follows is the shape decided by the `config-resolution` and `packaging` topics,
-and the one operational requirement that is easy to get wrong.
+**Not yet installable** — the package builds and the console script serves MCP
+over stdio, registering the full tool surface described above. The `@v0.1.0`
+in the example below is also not yet reachable: this repository carries no
+version tag, and the pinned-tag install was verified against a scratch copy
+rather than against this one. What follows is the shape decided by the
+`config-resolution` and `packaging` topics, and the one operational
+requirement that is easy to get wrong.
 
 A consuming project commits a `.mcp.json` carrying no secrets:
 

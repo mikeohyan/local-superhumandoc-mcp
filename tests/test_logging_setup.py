@@ -9,14 +9,22 @@ import pytest
 from superhumandoc_mcp.__main__ import _configure_logging
 from superhumandoc_mcp.config import Config
 
+_LOGGER_NAME = "superhumandoc_mcp"
+
 
 @pytest.fixture(autouse=True)
-def _restore_root_logger():
+def _restore_logger_state():
+    logger = logging.getLogger(_LOGGER_NAME)
+    saved_level = logger.level
+    saved_handlers = logger.handlers[:]
+    saved_propagate = logger.propagate
     root = logging.getLogger()
-    saved_level, saved_handlers = root.level, root.handlers[:]
+    saved_root_level = root.level
     yield
-    root.handlers[:] = saved_handlers
-    root.setLevel(saved_level)
+    logger.handlers[:] = saved_handlers
+    logger.setLevel(saved_level)
+    logger.propagate = saved_propagate
+    root.setLevel(saved_root_level)
 
 
 def _config(level: str) -> Config:
@@ -32,29 +40,43 @@ def _config(level: str) -> Config:
 
 def test_configure_logging_applies_the_resolved_level():
     _configure_logging(_config("DEBUG"))
-    assert logging.getLogger().level == logging.DEBUG
+    assert logging.getLogger(_LOGGER_NAME).level == logging.DEBUG
 
 
 def test_configure_logging_can_lower_the_level_again():
-    """`basicConfig` is a no-op once the root logger has handlers -- and
-    pytest's own logging plugin has already installed one before this test
-    runs, at level WARNING. Two `_configure_logging` calls that both land on
-    WARNING would pass vacuously against that default without proving
-    anything moved. Seed the level directly (bypassing `_configure_logging`)
-    to a value pytest did not choose, so the assertion can only pass if the
-    `force=True` call actually overrode it.
+    """Seed the package logger to a level `_configure_logging` did not choose,
+    so the assertion can only pass if the second call actually moved it, not
+    because it happened to already be there.
     """
-    logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger(_LOGGER_NAME).setLevel(logging.DEBUG)
     _configure_logging(_config("WARNING"))
-    assert logging.getLogger().level == logging.WARNING
+    assert logging.getLogger(_LOGGER_NAME).level == logging.WARNING
 
 
 def test_configure_logging_never_writes_to_stdout():
     _configure_logging(_config("INFO"))
     streams = [
         handler.stream
-        for handler in logging.getLogger().handlers
+        for handler in logging.getLogger(_LOGGER_NAME).handlers
         if isinstance(handler, logging.StreamHandler)
     ]
-    assert streams, "expected basicConfig to install a handler"
+    assert streams, "expected _configure_logging to install a handler"
     assert sys.stdout not in streams
+
+
+def test_configure_logging_leaves_the_root_logger_untouched():
+    """The regression this fix exists to prevent: raising the package logger's
+    level must not raise root's, or every library's own logging (httpx, for
+    one) switches on for a user who only meant to control this server's own
+    output.
+    """
+    root = logging.getLogger()
+    root.setLevel(logging.WARNING)
+    _configure_logging(_config("DEBUG"))
+    assert root.level == logging.WARNING
+
+
+def test_configure_logging_does_not_accumulate_handlers():
+    _configure_logging(_config("INFO"))
+    _configure_logging(_config("DEBUG"))
+    assert len(logging.getLogger(_LOGGER_NAME).handlers) == 1

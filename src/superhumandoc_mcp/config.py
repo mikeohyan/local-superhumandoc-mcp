@@ -156,8 +156,8 @@ def load_config(
         # for them and the file refused, which is the opposite of what happened.
         sources[_FLAG] = "restricted"
 
-    raw_log_level = resolved.get("SHDOC_LOG_LEVEL", "INFO")
-    log_level = raw_log_level.strip().upper()
+    raw_log_level = resolved.get("SHDOC_LOG_LEVEL", "")
+    log_level = raw_log_level.strip().upper() or "INFO"
     if log_level not in _LEVELS:
         raise ConfigError(
             f"SHDOC_LOG_LEVEL is {raw_log_level!r}, which is not a level. "

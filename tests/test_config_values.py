@@ -148,3 +148,15 @@ def test_log_level_is_normalised_to_upper_case(tmp_path):
     env = tmp_path / ".env"
     env.write_text("SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\nSHDOC_LOG_LEVEL=debug\n")
     assert load_config(str(env), {}, tmp_path).log_level == "DEBUG"
+
+
+def test_blank_log_level_falls_back_to_info(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\nSHDOC_LOG_LEVEL=\n")
+    assert load_config(str(env), {}, tmp_path).log_level == "INFO"
+
+
+def test_whitespace_only_log_level_falls_back_to_info(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\nSHDOC_LOG_LEVEL=   \n")
+    assert load_config(str(env), {}, tmp_path).log_level == "INFO"

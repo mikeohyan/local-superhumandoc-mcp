@@ -34,7 +34,9 @@ def test_every_gated_tool_is_named_in_the_comment():
     )
     assert gated, "expected the flag to gate at least one tool"
     text = ENV_EXAMPLE.read_text()
-    missing = sorted(name for name in gated if name not in text)
+    missing = sorted(
+        name for name in gated if not re.search(rf"\b{re.escape(name)}\b", text)
+    )
     assert not missing, f".env.example does not name gated tools: {missing}"
 
 

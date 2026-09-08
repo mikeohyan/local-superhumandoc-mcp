@@ -16,18 +16,24 @@ from superhumandoc_mcp.server import build_server
 
 
 def _configure_logging(config: Config) -> None:
-    """Apply the resolved level to the logging module.
+    """Apply the resolved level to this package's own logger, not the root.
 
-    stderr, not stdout: stdout carries the MCP transport. `force=True`
-    because basicConfig is a no-op once the root logger has handlers, and
-    this must be able to lower a level a library already raised.
+    stderr, not stdout: stdout carries the MCP transport. Scoped to the
+    `superhumandoc_mcp` logger, rather than `logging.basicConfig` on root,
+    because raising root's level switches on every library's own logging too
+    -- `httpx`, for one, would start emitting a line per API call for a user
+    who never asked for that. `propagate = False` keeps those same records
+    from reaching root's handlers a second time. The logger's handlers are
+    replaced outright, not appended to, so a second call (or a repeated
+    lowering of the level) does not accumulate duplicate output.
     """
-    logging.basicConfig(
-        level=config.log_level,
-        stream=sys.stderr,
-        format="%(levelname)s %(name)s: %(message)s",
-        force=True,
-    )
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+
+    logger = logging.getLogger("superhumandoc_mcp")
+    logger.handlers = [handler]
+    logger.setLevel(config.log_level)
+    logger.propagate = False
 
 
 def main() -> None:
