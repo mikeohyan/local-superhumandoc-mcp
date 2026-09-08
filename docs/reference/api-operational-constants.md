@@ -828,6 +828,18 @@ exported (<https://connect.superhuman.com/t/55845/1>); Eric Koleda called it *"a
 really reasonable request"* and filed it, still open. [SPEC-VERIFIED] `PageType` is
 `[canvas, embed, syncPage]`.
 
+**The specification's `PageType` enum is incomplete: `table` is a fourth value.**
+[MEASURED 2026-09-08] `GET /docs/6vqpBu-VYd/pages` returns `contentType: "table"`
+for the two table pages in the scratch document, and `getPage` on one of them
+agrees. Nothing in the specification lists it. This matters to any code that
+branches on `contentType`: a reader that treats the enum as closed, or that
+assumes anything not `embed` or `syncPage` is a canvas, will try to export a
+table page. `read_page` requires `canvas` positively rather than excluding the
+two known-bad values, so it refuses a table page by name before any export is
+attempted — which is the behaviour this finding argues for, arrived at before
+the finding existed. Whether a table page *can* be exported is untested; the
+refusal is this client's precondition, not an observed 400.
+
 **Markdown export drops page-level attachments; HTML keeps them** [STAFF] —
 Eric Koleda, 2025-08-25, <https://connect.superhuman.com/t/57065/2>: *"we don't have
 a dedicated API endpoint for getting page-level file attachments. While they are
