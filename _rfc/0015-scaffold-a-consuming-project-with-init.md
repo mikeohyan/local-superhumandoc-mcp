@@ -1,9 +1,9 @@
 ---
 rfc: 0015
 title: Scaffold a consuming project with an `init` subcommand
-status: Proposed
+status: Accepted
 created: 2026-09-08
-decided:
+decided: 2026-09-08
 supersedes:
 superseded_by:
 topic: project-setup

@@ -28,7 +28,7 @@ decision may not yet be accepted.
 | `evidence-location` | 0003 | Implemented | `_rfc/archive/implemented/0003-evidence-and-reference-material.md` |
 | `failure-policy` | 0010 | Implemented | `_rfc/archive/implemented/0010-failure-classification-and-retry-policy.md` |
 | `packaging` | 0007 | Implemented | `_rfc/archive/implemented/0007-packaging-and-distribution.md` |
-| `project-setup` | 0015 | Proposed | `_rfc/0015-scaffold-a-consuming-project-with-init.md` |
+| `project-setup` | 0015 | Accepted | `_rfc/0015-scaffold-a-consuming-project-with-init.md` |
 | `request-sizing` | 0014 | Implemented | `_rfc/archive/implemented/0014-measure-the-row-instead-of-estimating-it.md` |
 | `rfc-process` | 0001 | Implemented | `_rfc/archive/implemented/0001-rfc-process.md` |
 | `server-ownership` | 0004 | Implemented | `_rfc/archive/implemented/0004-build-local-doc-scoped-server.md` |
@@ -41,8 +41,8 @@ fallbacks: shipped code written against them is described by their
 replacements, which carry those parts forward deliberately.
 
 Every topic except `project-setup` is Implemented as of 2026-09-08 — the whole
-decided surface is built, and the one exception is a new subject rather than a
-revision of a built one. That is a snapshot, not a rule: the next decision on any
+built surface. `project-setup` is Accepted and not yet shipped: a new subject
+rather than a revision of a built one. That is a snapshot, not a rule: the next decision on any
 subject rewrites its row here and appears in the in-flight table below until it
 ships.
 
@@ -52,7 +52,7 @@ Proposed and Accepted: decided or awaiting decision, not yet shipped.
 
 | # | Title | Topic | Status | Decided | Path |
 |---|---|---|---|---|---|
-| 0015 | Scaffold a consuming project with an `init` subcommand | `project-setup` | Proposed | — | `_rfc/0015-scaffold-a-consuming-project-with-init.md` |
+| 0015 | Scaffold a consuming project with an `init` subcommand | `project-setup` | Accepted | 2026-09-08 | `_rfc/0015-scaffold-a-consuming-project-with-init.md` |
 
 ## Implemented — `_rfc/archive/implemented/`
 
