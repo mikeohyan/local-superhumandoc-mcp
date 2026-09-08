@@ -69,11 +69,17 @@ async def export_page(
     interval = EXPORT_POLL_INTERVAL_S
     refreshes = 0
 
-    # Clamped like every other subordinate wait. Unclamped, this is the sleep
-    # that would run before any loop condition is even checked and so could
-    # overshoot straight into the reserved tail before a single question is
-    # asked.
-    await sleep(deadline.clamp(EXPORT_INITIAL_SLEEP_S))
+    # Half of what remains, not the full clamp: this sleep runs before any
+    # loop condition is checked, so a plain `deadline.clamp(...)` can spend
+    # the *entire* remaining budget whenever remaining is at or below
+    # `EXPORT_INITIAL_SLEEP_S` — leaving `DocsClient.request` nothing to work
+    # with and refusing on `deadline.expired` before the one question this
+    # carve-out exists to ask is ever sent. Reserving half of whatever is
+    # left, capped at the module's own initial-sleep constant, guarantees
+    # some budget always survives the wait, however little there was to begin
+    # with. Same rule as `polling.py`'s mutation loop, with this loop's own
+    # constant.
+    await sleep(min(EXPORT_INITIAL_SLEEP_S, deadline.remaining() / 2))
     while True:
         try:
             body = await api.get_export_status(page, request_id, deadline)
@@ -105,7 +111,7 @@ async def export_page(
             if link:
                 try:
                     return await downloader.fetch(link, deadline)
-                except DownloadUnusable:
+                except DownloadUnusable as unusable:
                     # A link expires in about five minutes while the file
                     # behind it lives for days, so a stale link is the
                     # likeliest cause of a late failure -- and the spec
@@ -115,10 +121,17 @@ async def export_page(
                     # re-mint poll the same 404 grace window as any other.
                     refreshes += 1
                     if refreshes > EXPORT_MAX_LINK_REFRESH:
+                        # `DownloadUnusable` is also what a transport failure
+                        # (a timeout, a connection drop) raises at this same
+                        # tokenless hop, not only a stale link -- so the
+                        # exhaustion message must carry the last failure's own
+                        # reason rather than assert it was link-minting,
+                        # which would misname a network problem.
                         raise ClientError(
                             f"the download link for page {page!r} could not "
                             "be used even after being re-minted "
-                            f"{EXPORT_MAX_LINK_REFRESH} times"
+                            f"{EXPORT_MAX_LINK_REFRESH} times: "
+                            f"{unusable.reason}"
                         ) from None
         if clock() >= ceiling:
             raise ClientError(

@@ -76,11 +76,16 @@ async def await_mutation(
     ceiling = started + deadline.clamp(MUTATION_DEADLINE_S)
     grace_ends = started + MUTATION_404_GRACE_S
     interval = MUTATION_POLL_INTERVAL_S
-    # Clamped like every other subordinate wait. Unclamped, this is the sleep
-    # that would run before any loop condition is even checked and so could
-    # overshoot straight into the reserved tail before a single question is
-    # asked.
-    await sleep(deadline.clamp(MUTATION_INITIAL_SLEEP_S))
+    # Half of what remains, not the full clamp: this sleep runs before any
+    # loop condition is checked, so a plain `deadline.clamp(...)` can spend
+    # the *entire* remaining budget whenever remaining is at or below
+    # `MUTATION_INITIAL_SLEEP_S` — leaving `DocsClient.request` nothing to
+    # work with and refusing on `deadline.expired` before the one question
+    # this carve-out exists to ask is ever sent. Reserving half of whatever
+    # is left, capped at the module's own initial-sleep constant, guarantees
+    # some budget always survives the wait, however little there was to
+    # begin with.
+    await sleep(min(MUTATION_INITIAL_SLEEP_S, deadline.remaining() / 2))
     while True:
         try:
             body = await api.get_mutation_status(request_id, deadline)

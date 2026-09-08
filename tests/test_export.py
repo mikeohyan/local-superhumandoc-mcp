@@ -1,7 +1,12 @@
 import pytest
 
 from superhumandoc_mcp.deadline import Deadline
-from superhumandoc_mcp.errors import ClientError, RateLimited, UpstreamRefused
+from superhumandoc_mcp.errors import (
+    ClientError,
+    DownloadUnusable,
+    RateLimited,
+    UpstreamRefused,
+)
 from superhumandoc_mcp.export import (
     EXPORT_404_GRACE_S,
     EXPORT_DEADLINE_S,
@@ -39,6 +44,50 @@ class _ExportApi:
         if isinstance(reply, Exception):
             raise reply
         return reply
+
+
+class _DeadlineRespectingExportApi:
+    """Answers the status poll like `_ExportApi`, but refuses once the
+    deadline has expired -- the way the real `DocsClient.request` does,
+    rather than answering regardless of how much budget is left.
+
+    `_ExportApi` cannot see a defect in the opening sleep: it answers no
+    matter what the deadline looks like, so a sleep that silently consumed
+    the entire remaining budget before ever asking still "passed" against
+    it. Kickoff is left ungated here -- a real client gates that call
+    itself, and this double exists only to measure the status poll the
+    opening sleep is meant to make possible.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    async def begin_export(self, page, output_format, deadline):
+        return {"id": "exp-1"}
+
+    async def get_export_status(self, page, request_id, deadline):
+        if deadline.expired:
+            raise ClientError(
+                "getPageContentExportStatus: this tool call ran out of time "
+                "before the request could be sent."
+            )
+        self.calls += 1
+        return {"downloadLink": "https://s3/x"}
+
+
+class _NetworkFailingDownloader:
+    """Fails every fetch with a network-shaped reason rather than a
+    link-shaped one -- what defect 4 pins is that this reason must survive
+    into the exhaustion message, rather than being replaced by boilerplate
+    about re-minting that names the wrong cause."""
+
+    def __init__(self, reason: str) -> None:
+        self._reason = reason
+        self.calls = 0
+
+    async def fetch(self, url: str, deadline) -> str:
+        self.calls += 1
+        raise DownloadUnusable(url, self._reason)
 
 
 async def test_a_link_is_followed_once_the_export_completes():
@@ -196,6 +245,35 @@ async def test_re_minting_is_bounded_and_stops_well_short_of_the_ceiling():
     assert clock() < EXPORT_DEADLINE_S / 2
 
 
+async def test_the_exhaustion_message_carries_the_real_download_failure():
+    """`DownloadUnusable` is raised for a stale link, but it is also what a
+    transport failure -- a timeout, a connection drop -- raises at that same
+    tokenless hop. The exhaustion message this loop gives up with used to say
+    only that the link "could not be used even after being re-minted", with
+    `from None` dropping the exception chain -- so a network failure ended up
+    blamed on link-minting, the wrong cause entirely. The fix carries the
+    last `DownloadUnusable`'s own `.reason` into that message.
+
+    Three fetches (the kickoff link plus `EXPORT_MAX_LINK_REFRESH` re-mints)
+    and three status polls, and the final message must name the real
+    failure, not the boilerplate about re-minting alone.
+    """
+    clock, _, sleep = _fixtures()
+    api = _ExportApi([
+        {"downloadLink": "https://s3/x"},
+        {"downloadLink": "https://s3/x"},
+        {"downloadLink": "https://s3/x"},
+    ])
+    downloader = _NetworkFailingDownloader("the connection was dropped mid-transfer")
+    with pytest.raises(ClientError) as caught:
+        await export_page(api, downloader, "page-x", "markdown",
+                          Deadline(clock=clock), clock=clock, sleep=sleep)
+    assert downloader.calls == EXPORT_MAX_LINK_REFRESH + 1
+    assert api.begun == 1
+    assert "the connection was dropped mid-transfer" in str(caught.value)
+    assert clock() < EXPORT_DEADLINE_S / 2
+
+
 async def test_the_interval_backs_off_and_caps():
     """The tuned numbers, pinned by value the way the mutation loop's are.
     Nothing else here would notice the backoff silently becoming linear, or the
@@ -228,23 +306,37 @@ async def test_the_export_ceiling_never_extends_the_tool_deadline():
     by what the deadline has left, not by the export's own forty-five-second
     allowance.
 
-    A deadline with only 1.0s of working budget left (`total_s=11.0`, with the
-    default 10s reserved tail) makes the opening sleep -- itself clamped --
-    consume exactly that budget, landing the clock exactly on the ceiling. The
-    next iteration's ceiling check then fires first, before `can_afford` is
+    The opening sleep now only ever spends half of what remains (see
+    `test_the_opening_wait_is_clamped_like_every_other`), so it can no longer
+    be relied on to land the clock exactly on the ceiling by itself -- this
+    scenario instead needs the loop to walk there, one backed-off interval at
+    a time. `Deadline(total_s=17.0)` leaves `remaining()` at 7.0s (the default
+    10s reserved tail subtracted); the poll schedule this loop actually
+    produces (2.0s opening, then 2.0s, then 3.0s) lands a poll at exactly
+    t=7.0 -- `can_afford(3.0)` at t=4.0 sees exactly 3.0s left and allows that
+    last sleep, so nothing gives up early. At that poll the ceiling
+    (`started + deadline.clamp(EXPORT_DEADLINE_S)` = `started + 7.0`, since
+    7.0 is less than the 45s allowance) fires first, before `can_afford` is
     ever consulted, and only the ceiling branch's message names the export
-    deadline. A bound on the clock alone cannot tell `clamp` apart from its
-    absence here: both land on the same clock value (`can_afford` sees the
-    same exhausted budget either way and raises its own message instead), so
-    it is the message, not the clock, that discriminates.
+    deadline.
+
+    A bound on the clock alone cannot tell `clamp` apart from its absence
+    here: both land on the same clock value, t=7.0 -- confirmed by running
+    this scenario with `deadline.clamp` replaced by the bare
+    `EXPORT_DEADLINE_S`, and separately with the `if clock() >= ceiling`
+    check deleted outright, and finding both still stop at t=7.0. What
+    differs is which check actually fires: with the ceiling gone or too loose
+    to trip yet, `can_afford` sees the same exhausted budget and raises its
+    own message instead. So it is the message, not the clock, that
+    discriminates.
     """
     clock, _, sleep = _fixtures()
     api = _ExportApi([])  # never completes
     with pytest.raises(ClientError) as caught:
         await export_page(api, _fixed_downloader("x"), "page-x", "markdown",
-                          Deadline(total_s=11.0, clock=clock),
+                          Deadline(total_s=17.0, clock=clock),
                           clock=clock, sleep=sleep)
-    assert clock() == 1.0
+    assert clock() == 7.0
     assert "did not complete within the export deadline" in str(caught.value)
 
 
@@ -268,13 +360,58 @@ async def test_the_opening_wait_is_clamped_like_every_other():
     into the reserved tail before a single question is asked. This is the
     defect the mutation loop shipped with. The assertion is an equality, not a
     bound: `<=` would also pass an implementation that never sleeps at all,
-    which would hammer the status endpoint from the first instant."""
+    which would hammer the status endpoint from the first instant.
+
+    `Deadline(total_s=11.0)` leaves `remaining()` at 1.0s (default 10s
+    reserved tail). The opening sleep takes half of that (0.5s), not all of
+    it: spending the whole 1.0s here would leave nothing for the one question
+    this wait exists to make possible, which is the same reasoning
+    `test_a_link_survives_a_deadline_squeezed_down_to_almost_nothing` below
+    measures the benefit of directly.
+    """
     clock, slept, sleep = _fixtures()
     api = _ExportApi([{"downloadLink": "https://s3/x"}])
     await export_page(api, _fixed_downloader("x"), "page-x", "markdown",
                       Deadline(total_s=11.0, clock=clock),
                       clock=clock, sleep=sleep)
-    assert slept[0] == 1.0
+    assert slept[0] == 0.5
+
+
+@pytest.mark.parametrize(
+    "remaining",
+    [1.0, 1.5, 2.0, 2.5, 3.0, 80.0],
+)
+async def test_a_link_survives_a_deadline_squeezed_down_to_almost_nothing(remaining):
+    """The defect this pins: `await sleep(deadline.clamp(EXPORT_INITIAL_SLEEP_S))`
+    consumed the *entire* remaining budget whenever remaining was at or below
+    `EXPORT_INITIAL_SLEEP_S` (2.0s), so `DocsClient.request` then refused on
+    `deadline.expired` before the export status was ever asked about --
+    `remaining=1.0/1.5/2.0` all made zero HTTP calls against the real client,
+    even though the carve-out exists precisely so a call this squeezed still
+    gets its one cheap question. `remaining=2.5/3.0/80.0` already worked, and
+    stay working.
+
+    `_ExportApi` cannot catch this: it answers regardless of the deadline it
+    is handed. `_DeadlineRespectingExportApi` refuses once expired, the way
+    the real client does, so it is what would have failed here before the
+    fix -- `test_polling.py`'s sibling test measures the same benefit for
+    the mutation loop.
+    """
+    clock, _, sleep = _fixtures()
+    api = _DeadlineRespectingExportApi()
+
+    body = await export_page(
+        api,
+        _fixed_downloader("# Page"),
+        "page-x",
+        "markdown",
+        Deadline(total_s=remaining + 10.0, clock=clock),
+        clock=clock,
+        sleep=sleep,
+    )
+
+    assert api.calls == 1
+    assert body == "# Page"
 
 
 async def test_the_page_and_format_reach_the_kickoff_unchanged():
