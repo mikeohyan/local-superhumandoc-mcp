@@ -104,7 +104,15 @@ refusing outright the way a whole-run guard would.
 There is no promise that a run produces every artifact or leaves the directory
 exactly as it found it — pre-checking existence never delivered that anyway,
 since a permissions error or a full disk between two independent writes has no
-rollback, and this RFC does not claim otherwise. What `init` guarantees instead
+rollback, and this RFC does not claim otherwise. A failure on one artifact does
+not stop the run: `init` attempts every remaining artifact even after one
+fails, rather than aborting on the first. Aborting would contradict the
+per-artifact independence the whole rule rests on — a command that stops
+because `.env` failed is not treating `.mcp.json` independently, it is
+treating `.env` as a gate again — and it would leave the user knowing less
+about the directory's actual state than a full report gives them: a person
+recovering from a failure needs to know what happened to every artifact, not
+just the one that broke first. What `init` guarantees instead
 is that it reports, per artifact, what it wrote and what it skipped and why —
 `wrote .env`, `skipped .mcp.json: already exists` — so the report, not an
 atomicity guarantee, is what makes a partial run recoverable: the user can see
@@ -128,8 +136,12 @@ Context above rather than contradicting it: finding nothing to do is the
 expected steady state of a directory `init` has already finished, not an error
 condition. `SystemExit(2)`, the same code `__main__.py` already uses for
 configuration failure, is reserved for genuine failure instead: an artifact
-that could not be written because of a permissions or I/O error. That failure
-prints to stderr, distinct from the stdout report above.
+that could not be written because of a permissions or I/O error. Because
+`init` attempts every artifact regardless of earlier failures, that failure
+prints to stderr and `init` exits `SystemExit(2)` if any attempted artifact
+failed, whether or not others in the same run succeeded — the exit code
+speaks for the run as a whole, distinct from the stdout report above, which
+speaks for each artifact in it.
 
 `.gitignore` gets different treatment, but by policy rather than by exception —
 appending a line destroys nothing an existing `.gitignore` holds, so there is
@@ -191,10 +203,10 @@ being reinterpreted.
 Errors — the genuine-failure case above, not the per-artifact report — follow
 the precedent already in `__main__.py` rather than RFC 0007's `ToolError`
 convention, which cannot apply: `ToolError` carries a message to a model inside
-a running MCP session, and `init` finishes before any session exists. A failure
-prints to stderr and `init` exits with `SystemExit(2)`, the same code
-`__main__.py` already raises for configuration failure, rather than inventing a
-second convention for what is, at bottom, the same kind of failure.
+a running MCP session, and `init` finishes before any session exists. The
+stderr-and-`SystemExit(2)` behavior described above is that same precedent,
+not a second convention invented for what is, at bottom, the same kind of
+failure.
 
 ## Alternatives considered
 
@@ -334,6 +346,15 @@ does not own.** The stanza is currently stable and shared across MCP clients, bu
 if it changes, projects scaffolded by older versions carry the old shape, and
 they carry it in a committed file rather than a regenerable one. The mitigation
 is only that `init` writes the minimal documented form and no optional keys.
+
+**A project with a pre-existing `.mcp.json` gets no stanza written at all.**
+Per-artifact independence keeps that collision from blocking `.env`, but
+`.mcp.json` itself is still refused outright when present, and `init` does not
+merge into it (see the "Merge the stanza" alternative above). The user is left
+to open the file and hand-write the stanza `init` would otherwise have
+produced — `type: stdio`, `command: uvx`, and the pinned `args` — with no
+tooling help for the case, an ordinary one, where a project already registers
+some other MCP server.
 
 **Writing `.gitignore` touches a file this project does not own.** Appending one
 line is close to the smallest possible intrusion, and it is idempotent, but a
