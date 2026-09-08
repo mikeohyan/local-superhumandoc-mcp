@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -12,6 +13,21 @@ from superhumandoc_mcp.config import (
 )
 from superhumandoc_mcp.errors import AuthFailure, ClientError
 from superhumandoc_mcp.server import build_server
+
+
+def _configure_logging(config: Config) -> None:
+    """Apply the resolved level to the logging module.
+
+    stderr, not stdout: stdout carries the MCP transport. `force=True`
+    because basicConfig is a no-op once the root logger has handlers, and
+    this must be able to lower a level a library already raised.
+    """
+    logging.basicConfig(
+        level=config.log_level,
+        stream=sys.stderr,
+        format="%(levelname)s %(name)s: %(message)s",
+        force=True,
+    )
 
 
 def main() -> None:
@@ -25,6 +41,8 @@ def main() -> None:
         # stderr, not stdout: stdout is the MCP transport.
         print(f"superhumandoc-mcp: {error}", file=sys.stderr)
         raise SystemExit(2) from error
+
+    _configure_logging(config)
 
     identity = asyncio.run(_identify(config))
     print(format_startup_line(config, identity), file=sys.stderr)

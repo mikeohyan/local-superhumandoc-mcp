@@ -130,3 +130,21 @@ def test_the_locator_is_not_configuration(tmp_path: Path) -> None:
     named.write_text(REQUIRED + "SHDOC_ENV_FILE=/ignored\n")
     config = load_config(None, {"SHDOC_ENV_FILE": str(named)}, tmp_path)
     assert "SHDOC_ENV_FILE" not in config.sources
+
+
+def test_unusable_log_level_is_rejected(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text(
+        "SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\nSHDOC_LOG_LEVEL=chatty\n"
+    )
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(str(env), {}, tmp_path)
+    message = str(excinfo.value)
+    assert "chatty" in message
+    assert "DEBUG" in message
+
+
+def test_log_level_is_normalised_to_upper_case(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\nSHDOC_LOG_LEVEL=debug\n")
+    assert load_config(str(env), {}, tmp_path).log_level == "DEBUG"

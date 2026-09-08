@@ -24,6 +24,7 @@ _FLAG = "SHDOC_ALLOW_DESTRUCTIVE"
 # A locator, not configuration: it says where to look, and the file it names
 # has already been read by the time anything below runs.
 _LOCATOR = "SHDOC_ENV_FILE"
+_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
 
 def parse_affirmative(value: str | None) -> bool:
@@ -155,11 +156,19 @@ def load_config(
         # for them and the file refused, which is the opposite of what happened.
         sources[_FLAG] = "restricted"
 
+    raw_log_level = resolved.get("SHDOC_LOG_LEVEL", "INFO")
+    log_level = raw_log_level.strip().upper()
+    if log_level not in _LEVELS:
+        raise ConfigError(
+            f"SHDOC_LOG_LEVEL is {raw_log_level!r}, which is not a level. "
+            f"Use one of: {', '.join(_LEVELS)}."
+        )
+
     return Config(
         api_key=resolved["SHDOC_API_KEY"],
         doc_id=resolved["SHDOC_DOC_ID"],
         allow_destructive=allow_destructive,
-        log_level=resolved.get("SHDOC_LOG_LEVEL", "INFO"),
+        log_level=log_level,
         env_file=env_file,
         sources=sources,
     )
