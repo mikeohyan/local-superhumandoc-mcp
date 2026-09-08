@@ -121,6 +121,74 @@ async def test_a_write_reports_applied_never_succeeded():
     assert "succeeded" not in str(result).lower()
 
 
+async def test_create_page_returns_the_new_page_id():
+    """The 202 body carries the created page's id (measured 2026-09-08:
+    `{"id": "canvas-jBZGx4yN81", "requestId": ...}`), and it is the page's
+    real, permanent id. Without surfacing it a model that has just made a
+    page cannot address the page it made: it has to list the document and
+    match on the name it asked for, which is ambiguous the moment two pages
+    share a name — the validation doc records this document already holding
+    two pages both named `b6-20260907T145220Z`."""
+
+    def handler(call: dict) -> dict:
+        if call["path"].startswith("/mutationStatus/"):
+            return {"completed": True}
+        return {"id": "canvas-new01", "requestId": "r-1"}
+
+    clock, _, sleep = _fixtures()
+    result = await create_page(
+        _api(handler), "X", content="<p>hi</p>", clock=clock, sleep=sleep
+    )
+    assert result["page_id"] == "canvas-new01"
+    assert result["outcome"] == "applied"
+
+
+async def test_create_page_reports_a_missing_id_as_none_rather_than_omitting_it():
+    """Same convention as `warning`: the key is always there, valued None
+    when the API did not say. A caller that has to test for a missing key
+    reads a shape that changes with the weather."""
+
+    def handler(call: dict) -> dict:
+        if call["path"].startswith("/mutationStatus/"):
+            return {"completed": True}
+        return {"requestId": "r-1"}
+
+    clock, _, sleep = _fixtures()
+    result = await create_page(
+        _api(handler), "X", content="<p>hi</p>", clock=clock, sleep=sleep
+    )
+    assert "page_id" in result
+    assert result["page_id"] is None
+
+
+async def test_create_page_still_reports_the_id_when_the_poll_gives_up():
+    """An unknown outcome is exactly when the id matters most: the page may
+    well exist, and this is the only handle on it the caller will ever get.
+    Dropping the id here would leave a model unable to check, or to clean
+    up, precisely when it most needs to."""
+
+    def handler(call: dict) -> dict:
+        if call["path"].startswith("/mutationStatus/"):
+            return {"completed": False}
+        return {"id": "canvas-new01", "requestId": "r-1"}
+
+    clock, _, sleep = _fixtures()
+    result = await create_page(
+        _api(handler), "X", content="<p>hi</p>", clock=clock, sleep=sleep
+    )
+    assert result["outcome"] == "unknown"
+    assert result["page_id"] == "canvas-new01"
+
+
+async def test_no_other_write_tool_grew_a_page_id():
+    """`page_id` is `create_page`'s alone. A rename or an append did not
+    create anything, so a page id in their report would invite a reader to
+    think something new exists."""
+    clock, _, sleep = _fixtures()
+    result = await rename_page(_api(), "p-1", "New", clock=clock, sleep=sleep)
+    assert "page_id" not in result
+
+
 async def test_a_warning_reaches_the_caller_verbatim():
     """`warning` is read with `.get` and surfaced unchanged — reworded or
     dropped, a caller could not tell what the API actually reported."""

@@ -1335,6 +1335,34 @@ The page write surface in full: `POST /docs/{docId}/pages` (create),
 `POST .../export` + `GET .../export/{requestId}` for the asynchronous markdown
 or HTML read.
 
+[MEASURED 2026-09-08] **`createPage`'s 202 body carries the new page's id, not
+just a `requestId` — but the id is not readable until the mutation completes.**
+A live probe against scratch doc `6vqpBu-VYd` returned, verbatim:
+
+```
+RAW createPage 202 body:
+    'id': 'canvas-jBZGx4yN81'
+    'requestId': 'mutate:7b735abf-3f15-4178-a4b7-e2bef4ef8e1d'
+```
+
+That `id` is the page's real, permanent id: a later `delete_page` addressed to
+`canvas-jBZGx4yN81` succeeded. But it is not immediately *readable* — a
+`getPage` addressed to it roughly 20 seconds after the 202, and before the
+mutation reported `completed: true`, refused with `HTTP 404 "Could not find a
+page with the specified ID or name."` Once the mutation completes the id is
+usable immediately, with no wait at all: a follow-up run through the
+`create_page` tool, which polls the mutation to completion before returning,
+called `outline_page` on the returned id first try. So an id read off a 202
+body must not be treated as evidence the page can be read yet — only as
+evidence of what it will eventually be called.
+
+This makes `createPage` the second operation known to return a created
+resource's identity in its 202 body, alongside `upsertRows`' `addedRowIds`
+above. That suggests the "202 carries only a `requestId`" reading of the
+eleven-operation list above is too narrow, and other operations in it may
+carry identities nobody has looked for yet — an open question, not a finding.
+Recorded in `docs/validation/2026-09-08-live-tool-surface.md`.
+
 **`contentUpdate` can be scoped to a single element, and element IDs survive
 the write** [probe B6, measured live 2026-09-07]. This was the open question
 that decided whether an anchored edit is possible at all, and both halves came

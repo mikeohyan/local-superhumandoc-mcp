@@ -750,11 +750,49 @@ the tool.
   ("delete every element of a page's canvas") and has since been corrected
   to record the measured one-line survivor (see L4b above; also recorded
   in `docs/reference/api-operational-constants.md`).
-- `create_page` returning no id for the page it just created is an
-  ergonomic gap worth a decision — the `tool-surface` topic is where this
-  belongs — because addressing that page afterward requires a second lookup
-  by name, and that lookup is ambiguous whenever two pages share a name (see
-  L3 findings above).
+- `create_page` returning no id for the page it just created was an
+  ergonomic gap; it has since been **fixed**. A live probe against scratch
+  doc `6vqpBu-VYd` showed the 202 body already carries the id alongside
+  `requestId`:
+
+  ```
+  RAW createPage 202 body:
+      'id': 'canvas-jBZGx4yN81'
+      'requestId': 'mutate:7b735abf-3f15-4178-a4b7-e2bef4ef8e1d'
+  ```
+
+  `create_page` now returns a `page_id` key alongside `outcome`/`detail`/
+  `warning`, taken straight from that `id`. The key is always present and
+  `None` when the API did not report one — the same present-but-null
+  convention the `warning` key already follows, so a caller never has to
+  test for a missing key. Only `create_page` gained it: `rename_page` and
+  `append_to_page` create nothing, so a page id in their reports would
+  suggest something new exists where nothing did. The tool's description
+  now also tells the model to prefer the id over the name when addressing
+  the page afterward, because names are not unique in this document and
+  addressing by a duplicated name reaches an arbitrary one of them (see L3
+  findings above, and the two pages both named `b6-20260907T145220Z`).
+
+  This needed no RFC: no RFC specifies the write tools' return shape —
+  `{outcome, detail, warning}` is a code choice in
+  `superhumandoc_mcp.tools.writes._report`, and the governing topics
+  constrain only the outcome vocabulary (`applied`/`unknown`, never
+  `failed`) and the `warning` field's verbatim pass-through, not which
+  sibling fields may exist.
+
+  The same probe also found that the id is not immediately readable: a
+  `getPage` addressed to `canvas-jBZGx4yN81` roughly 20 seconds after the
+  202, and before the mutation reported `completed: true`, refused with
+  `HTTP 404 "Could not find a page with the specified ID or name."` Through
+  the `create_page` tool this is not a problem a caller has to plan for,
+  because the tool polls the mutation to completion before returning: the
+  id is usable as soon as the outcome is `applied`. See
+  `docs/reference/api-operational-constants.md` for the full measurement.
+
+  `upsert_rows` has the analogous gap still **open**. Its 202 body carries
+  `addedRowIds`, and the tool does not surface them, so a caller that
+  inserts rows still cannot address them without a follow-up `find_rows`.
+  Unfixed, and out of scope for this change.
 - Three things remain untested after this run, each for a stated reason
   rather than an oversight:
   - `push_button` — `test-table-02`'s button column has an action nobody has

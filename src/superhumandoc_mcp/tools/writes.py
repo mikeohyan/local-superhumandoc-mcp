@@ -91,7 +91,16 @@ _CREATE_PAGE_DESCRIPTION = (
     "before the call's deadline; an unknown outcome may already have gone "
     "through. A read immediately afterward may still show the old state: "
     "the document snapshot can lag behind the API's own acknowledgement of "
-    "the write."
+    "the write. Also returns `page_id`, the new page's permanent ID — use "
+    "it rather than the name to address the page afterwards, since names "
+    "are not unique and addressing by a duplicated name reaches an "
+    "arbitrary one of them. When the outcome is `applied` the page is "
+    "readable under that ID straight away, because this tool waits for the "
+    "mutation to complete before returning. When the outcome is `unknown` "
+    "the ID is still the right handle on the page, but a read addressed to "
+    "it may refuse with a 404 until the write finishes landing — retry "
+    "rather than concluding the page does not exist. `page_id` is null in "
+    "the rare case the API did not report one."
 )
 
 _APPEND_TO_PAGE_DESCRIPTION = (
@@ -373,7 +382,21 @@ async def create_page(
         canvas=canvas,
         deadline=deadline,
     )
-    return await _report(api, response, deadline, clock=clock, sleep=sleep)
+    report = await _report(api, response, deadline, clock=clock, sleep=sleep)
+    # The 202 body carries the new page's id alongside the `requestId`
+    # (measured 2026-09-08). `_report` reads only the request id, so without
+    # this the id was parsed and thrown away, leaving a model that had just
+    # made a page unable to name it: the only way back to it was to list the
+    # document and match on the name asked for, which is ambiguous the moment
+    # two pages share a name. Reported under a key that is always present and
+    # `None` when the API did not say, the same convention `warning` follows,
+    # so a caller never has to test for a missing key.
+    #
+    # Attached outside `_report` rather than inside it because only a tool
+    # that creates something has an id to report. A rename or an append made
+    # nothing, and a `page_id` in their reports would suggest otherwise.
+    report["page_id"] = response.get("id")
+    return report
 
 
 async def append_to_page(
