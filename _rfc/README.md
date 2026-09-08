@@ -22,8 +22,7 @@ decision may not yet be accepted.
 
 | Topic | Current RFC | Status | Path |
 |---|---|---|---|
-| `async-operations` | 0012 | Accepted | `_rfc/0012-async-operation-polling-and-export-budget.md` |
-| `upstream-api` | 0008 | Implemented | `_rfc/archive/implemented/0008-api-version-lock-and-advisory-rate-limits.md` |
+| `async-operations` | 0012 | Implemented | `_rfc/archive/implemented/0012-async-operation-polling-and-export-budget.md` |
 | `config-resolution` | 0006 | Implemented | `_rfc/archive/implemented/0006-credential-and-config-resolution.md` |
 | `doc-conventions` | 0009 | Implemented | `_rfc/archive/implemented/0009-documentation-reference-conventions.md` |
 | `evidence-location` | 0003 | Implemented | `_rfc/archive/implemented/0003-evidence-and-reference-material.md` |
@@ -32,26 +31,23 @@ decision may not yet be accepted.
 | `request-sizing` | 0014 | Implemented | `_rfc/archive/implemented/0014-measure-the-row-instead-of-estimating-it.md` |
 | `rfc-process` | 0001 | Implemented | `_rfc/archive/implemented/0001-rfc-process.md` |
 | `server-ownership` | 0004 | Implemented | `_rfc/archive/implemented/0004-build-local-doc-scoped-server.md` |
-| `tool-surface` | 0013 | Accepted | `_rfc/0013-html-content-and-the-read-write-cycle.md` |
+| `tool-surface` | 0013 | Implemented | `_rfc/archive/implemented/0013-html-content-and-the-read-write-cycle.md` |
+| `upstream-api` | 0008 | Implemented | `_rfc/archive/implemented/0008-api-version-lock-and-advisory-rate-limits.md` |
 
 `tool-surface` and `request-sizing` each name a supersede accepted on
 2026-09-06. The RFCs they replace are retired below and are history, not
 fallbacks: shipped code written against them is described by their
 replacements, which carry those parts forward deliberately.
 
-`tool-surface` is Accepted rather than Implemented on purpose. Seventeen of the
-eighteen tools it enumerates shipped on 2026-09-07; `read_page` did not, because
-it runs the export flow that `async-operations` owns and that flow is unbuilt.
-The status says so rather than rounding up.
+Every topic is Implemented as of 2026-09-08 — the whole decided surface is
+built. That is a snapshot, not a rule: the next decision on any subject rewrites
+its row here and appears in the in-flight table below until it ships.
 
 ## In flight — `_rfc/`
 
 Proposed and Accepted: decided or awaiting decision, not yet shipped.
 
-| # | Title | Topic | Status | Decided | Path |
-|---|---|---|---|---|---|
-| 0012 | Poll asynchronous operations on one bounded loop, and give export its own budget | `async-operations` | Accepted | 2026-09-06 | `_rfc/0012-async-operation-polling-and-export-budget.md` |
-| 0013 | Write page content as HTML, and never send a read back as a write | `tool-surface` | Accepted | 2026-09-06 | `_rfc/0013-html-content-and-the-read-write-cycle.md` |
+*Empty.* Nothing is currently in flight.
 
 ## Implemented — `_rfc/archive/implemented/`
 
@@ -68,6 +64,8 @@ works today.
 | 0008 | Pin development to Superhuman Docs API v1.6.0 and treat published rate limits as advisory | `upstream-api` | Implemented | 2026-09-04 | `_rfc/archive/implemented/0008-api-version-lock-and-advisory-rate-limits.md` |
 | 0009 | Reference decisions by topic and code by symbol, never by number or line | `doc-conventions` | Implemented | 2026-09-03 | `_rfc/archive/implemented/0009-documentation-reference-conventions.md` |
 | 0010 | Classify transport failures by whether the request was transmitted, and bound every retry by one deadline | `failure-policy` | Implemented | 2026-09-04 | `_rfc/archive/implemented/0010-failure-classification-and-retry-policy.md` |
+| 0012 | Poll asynchronous operations on one bounded loop, and give export its own budget | `async-operations` | Implemented | 2026-09-06 | `_rfc/archive/implemented/0012-async-operation-polling-and-export-budget.md` |
+| 0013 | Write page content as HTML, and never send a read back as a write | `tool-surface` | Implemented | 2026-09-06 | `_rfc/archive/implemented/0013-html-content-and-the-read-write-cycle.md` |
 | 0014 | Measure a row in the units the API counts, and report what a deadline left undone | `request-sizing` | Implemented | 2026-09-06 | `_rfc/archive/implemented/0014-measure-the-row-instead-of-estimating-it.md` |
 
 ## Retired — `_rfc/archive/retired/`

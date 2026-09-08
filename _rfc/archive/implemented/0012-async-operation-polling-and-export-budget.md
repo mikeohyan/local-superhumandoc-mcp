@@ -1,13 +1,13 @@
 ---
 rfc: 0012
 title: Poll asynchronous operations on one bounded loop, and give export its own budget
-status: Accepted
+status: Implemented
 created: 2026-09-06
 decided: 2026-09-06
 supersedes:
 superseded_by:
 topic: async-operations
-commits: []
+commits: [72a5d7d, 30dda23, a4a56fb, 4ddb007, 901b7d3, 65dc13d, 2d59580, 8f0c311, 73000dc, 475806d, 4673ddc, a1ad248, 1e1f5f4, 80f18ee, 4f59ba4, 886fc41]
 tags: [export, polling, concurrency]
 ---
 
@@ -283,4 +283,67 @@ provoking a 429, which this project does not do.
 
 ## Implementation notes
 
-Left empty at Proposed.
+Shipped 2026-09-07 and 2026-09-08. The mutation half had already shipped with
+the write wave; this records the export half and what the whole topic looks
+like built.
+
+**What was built as decided.** The kickoff/poll/download shape, the two loops
+sharing one structure and differing only in constants and terminal conditions,
+the 404 grace window against a 410 that is terminal at once, the re-mint ladder
+bounded at two refreshes, per-page serialisation with a global cap of three
+acquired in a fixed order, and the download as a tokenless hop outside every
+bucket whose link is never cached. `read_page` runs the whole flow and is the
+last tool the `tool-surface` topic enumerates.
+
+**Two constants in the decision could not have fired.** `EXPORT_DEADLINE_S` was
+90.0, identical to the tool-call deadline, so `clamp` always chose the outer
+budget and the export ceiling never bound; it was retuned to 45.0 in
+`docs/reference/`, which rule 10 permits without superseding. And
+`EXPORT_CONCURRENCY_PER_PAGE` was read by nothing — an `asyncio.Lock`'s fixed
+capacity of one happened to agree with it, which is not the same as enforcing
+it. It is a `Semaphore` sized by the constant now. Both are the same failure:
+a decided number that no code could act on, which looks identical to a
+satisfied requirement.
+
+**Probe E1 measured an export for the first time** on 2026-09-07 — 2.9 to 6.6
+seconds across three runs on two small pages. Every number in `docs/reference/`
+§1.4 before that was reasoning from staff prose about other people's documents.
+Three runs on small pages is not a distribution, but it settled the question
+that gated the wave: a page read fits inside one tool call. E1 also removed an
+expected obstacle. The recorded worry was that a dead link must be told from a
+good body by inspecting raw bytes, since a good body arrives gzip-encoded; in
+fact an S3 error document is plain XML with no encoding, so the check reads
+decoded text and never needs `iter_raw`.
+
+**What review found after the wave was green.** Two defects reached a passing
+suite. `read_page` keyed its cache and its export gate on the string the caller
+passed, but a page is addressed by id *or* name: two callers naming one page
+differently took different gate slots and exported at once into the single blob
+the gate exists to serialise, and left two cache entries that could serve the
+wrong page's content once a name moved. Resolving the keys to the canonical id
+was itself incomplete — the export request kept the caller's string, so a name
+moved between the lookup and the kickoff exported the other page and filed it
+under the first page's id. Both are closed; the request is addressed to the id
+and the caller's wording survives only in the failure message.
+
+The second was subtler. Both loops poll once unconditionally after their
+opening sleep, so a call placed near its own deadline can still get an answer.
+Measured against the real client, that bought nothing: clamping the opening
+sleep to whatever remained consumed the entire budget whenever the budget was
+smaller than the sleep, and the request was refused as expired before it was
+sent. The sleep now takes at most half of what remains. The test that pinned
+the carve-out used a double that ignored the deadline, so it measured the
+loop's shape while appearing to measure the benefit.
+
+**One thing this topic decides is in tension with the `failure-policy` topic.**
+Rule 6 makes the tool-call deadline the only authority; `failure-policy` fixes
+a 30-second read timeout by arithmetic against decided numbers. A poll begun
+with a fraction of a second left still spends the full 30, returning a tool
+call past its deadline. Both bodies are frozen, so closing it means superseding
+one of them. It is recorded here rather than patched.
+
+**Live verification, 2026-09-08.** `read_page` was run end to end against the
+scratch document: 5.4 seconds by id, then 0.13 seconds by name against one
+cache entry, and two concurrent reads addressed differently returned identical
+HTML through one gate slot. A table page and a missing page are both refused
+with the reason named.

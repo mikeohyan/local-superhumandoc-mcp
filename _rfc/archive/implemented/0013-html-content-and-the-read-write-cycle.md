@@ -1,13 +1,13 @@
 ---
 rfc: 0013
 title: Write page content as HTML, and never send a read back as a write
-status: Accepted
+status: Implemented
 created: 2026-09-06
 decided: 2026-09-06
 supersedes: 0005
 superseded_by:
 topic: tool-surface
-commits: [b6bfc45, 1f157af, 285ca88, 79b24bb, 2208614]
+commits: [b6bfc45, 1f157af, 285ca88, 79b24bb, 2208614, 6b994da, 8f0c311, 73000dc, a1ad248, 80f18ee]
 tags: [tools, fidelity, write-safety]
 ---
 
@@ -281,18 +281,17 @@ way a throttling bug is not.
 
 ## Implementation notes
 
-**Status remains Accepted, deliberately.** Seventeen of the eighteen tools this
-RFC enumerates shipped on 2026-09-07 — eleven always-on and all six gated.
-`read_page` is the one that did not, and it is the reason this RFC has not
-reached Implemented: marking it so would put a false record in `_rfc/`.
+**All eighteen tools shipped.** Seventeen landed on 2026-09-07 — eleven
+always-on and all six gated. `read_page` followed on 2026-09-08, once the
+`async-operations` topic's export half was built; it was never blocked on
+anything this RFC decides, only on the flow it runs. Twelve tools are always
+on and six are gated.
 
-`read_page` was never blocked on anything this RFC decides. It runs the export,
-which the `async-operations` topic owns, and that topic's export half was
-unbuilt when this wave ran. Probe E1 on 2026-09-07 has since measured an export
-end to end at 2.9 to 6.6 seconds, which settles the question that mattered:
-a page read fits inside one tool call, so the tool is buildable as specified
-and this RFC does not need superseding on that account. The remaining work is
-the export subsystem itself.
+Note for anyone reading the Decision above: its opening sentence says
+*"Seventeen tools. Eleven are always on"* while the enumeration that follows
+lists eighteen and twelve. **The enumeration is what was built.** The sentence
+is a miscount frozen at acceptance and cannot be corrected here; if this topic
+is ever superseded, fixing it belongs to the replacement.
 
 **What shipped, and what changed on the way.** Page content is written as HTML
 in every path. The rule that a read is never a write source is carried by the
@@ -328,3 +327,37 @@ correction belongs to whichever RFC finally lands `read_page`.
 threshold in its own body without delegating it to the constants file, so
 `OVERVIEW_INLINE_COLUMNS_MAX_TABLES` moves only by superseding — unlike every
 other tunable in that file. The constants file says so at that row.
+
+**`read_page` shipped with two defects that a green suite did not catch.** It
+keyed its rendered-page cache and its export gate on the string the caller
+passed. Because a page is addressed by id *or* name — the same fact the
+pre-write guard was fixed for, from the other side — two callers naming one
+page differently took different gate slots and exported at once, and left two
+cache entries that could serve the wrong page's HTML once a name moved to
+another page. Resolving both keys to the canonical id was still not enough: the
+export request itself kept the caller's string, so a name moved between the
+lookup and the kickoff exported the other page and filed its content under the
+first page's id. Both are closed.
+
+**A tool shipped in the first wave was unusable and nothing noticed.**
+`find_rows`' registered wrapper was annotated `-> list[dict]` while the function
+returns `{rows, complete, note}`; the SDK validates the return against the
+annotation, so every call came back as a redacted error and the rows never
+reached a model. It survived because no test had ever called a tool *through*
+the MCP boundary — every test invoked the underlying function directly. There
+is now one that calls all eighteen and compares the registered set exactly, so
+a tool added without an end-to-end path fails the suite.
+
+That test also exposed why the bug was invisible in one direction only: a bare
+`-> dict` annotation gives the SDK nothing to validate against, so a wrapper
+could return a list, or a string, unchallenged. `-> list[dict]` returning a
+dict fails; `-> dict` returning a list does not. Every wrapper on both
+registrars is annotated concretely now.
+
+**Live verification, 2026-09-08.** The whole surface had only ever run against
+mocks. `read_page` was exercised end to end against the scratch document, and
+the run recorded a fact the specification omits: `contentType` has a fourth
+value, `table`, beyond the `[canvas, embed, syncPage]` the spec lists. This
+tool is safe by construction rather than by luck of testing — it requires
+`canvas` positively instead of excluding the two known-bad values — but a
+reader written the other way round would have tried to export a table page.
