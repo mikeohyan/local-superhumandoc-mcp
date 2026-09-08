@@ -5,12 +5,16 @@ Claude and Claude Code. Written in Python, managed with `uv`, and intended to be
 set up per project folder: each project points the server at its own document
 and supplies its own credentials through a local `.env`.
 
-**Status: the server runs, and registers no tools yet.** Credential and config
-resolution, the HTTP client with its throttling, retry and failure-classification
-policy, and the server factory are implemented and tested. What is missing is the
-tool surface — the `tool-surface` and `request-sizing` topics are decided but not
-yet shipped — so a client that connects completes the handshake and finds nothing
-to call.
+**Status: the server is fully built.** Credential and config resolution, the
+HTTP client with its throttling, retry and failure-classification policy, the
+server factory, and the tool surface — decided by the `tool-surface` and
+`request-sizing` topics — are all implemented and tested. A client that
+connects finds twelve always-on tools: `outline_page`, `describe_table`,
+`get_doc_overview`, `get_row`, `find_rows`, `read_page`, `create_page`,
+`append_to_page`, `rename_page`, `replace_element`, `update_row`,
+`upsert_rows`. Six more — `delete_page`, `clear_page_content`,
+`overwrite_page`, `delete_element`, `delete_rows`, `push_button` — register
+only when `SHDOC_ALLOW_DESTRUCTIVE` is enabled.
 
 ## Setup
 
