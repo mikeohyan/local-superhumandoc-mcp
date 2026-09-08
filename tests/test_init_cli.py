@@ -86,3 +86,22 @@ def test_an_unknown_subcommand_fails_closed(
     with pytest.raises(SystemExit) as exit_info:
         main_module.main()
     assert exit_info.value.code != 0
+
+
+def test_a_failed_artifact_reaches_the_shell_as_exit_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the success path was asserted at the CLI boundary.
+
+    A `main` that ran the scaffolding and then exited 0 regardless left the
+    whole suite green, so a shell wrapper checking `$?` would never learn that
+    an artifact failed.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").mkdir()
+    monkeypatch.setattr(sys, "argv", ["superhumandoc-mcp", "init"])
+
+    with pytest.raises(SystemExit) as exit_info:
+        main_module.main()
+
+    assert exit_info.value.code == 2

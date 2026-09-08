@@ -155,10 +155,15 @@ def test_creates_gitignore_when_absent(tmp_path: Path) -> None:
 
 def test_appends_env_to_an_existing_gitignore(tmp_path: Path) -> None:
     path = tmp_path / ".gitignore"
-    path.write_text("__pycache__/\n", encoding="utf-8")
+    before = "  __pycache__/  \n\n\n*.log\n"
+    path.write_text(before, encoding="utf-8")
     assert scaffold_gitignore(tmp_path).line == "appended .gitignore: 1 line added"
-    lines = [l.strip() for l in path.read_text(encoding="utf-8").splitlines()]
-    assert "__pycache__/" in lines and ".env" in lines
+    text = path.read_text(encoding="utf-8")
+    # Byte preservation, not just presence: an implementation that rebuilt the
+    # file from stripped lines would satisfy a membership check while
+    # destroying the project's indentation and blank-line grouping.
+    assert text.startswith(before)
+    assert ".env" in [line.strip() for line in text.splitlines()]
 
 
 def test_an_existing_env_line_is_not_duplicated(tmp_path: Path) -> None:
@@ -186,6 +191,9 @@ def test_re_running_a_finished_directory_is_success(tmp_path: Path) -> None:
     assert "skipped .env: already exists" in out2.getvalue()
     assert "skipped .mcp.json: already exists" in out2.getvalue()
     assert "skipped .gitignore: already ignores .env" in out2.getvalue()
+    # The printed stanza is the entire mitigation for the .mcp.json collision.
+    # Without this it can be deleted from run_init with the suite still green.
+    assert '"superhumandoc": {' in out2.getvalue()
 
 
 def test_one_artifact_failing_does_not_stop_the_others(tmp_path: Path) -> None:
@@ -238,3 +246,56 @@ def test_a_missing_installation_fails_only_the_registration(
     assert "wrote .env" in printed and "wrote .gitignore" in printed
     assert not (tmp_path / ".mcp.json").exists()
     assert "superhumandoc-mcp: could not write .mcp.json:" in err.getvalue()
+
+
+def test_the_written_pin_is_the_installed_version() -> None:
+    """The RFC's requirement is that the pin is *derived* from the version.
+
+    Asserting only that `@v` appears leaves a hardcoded constant passing, which
+    would mint every future project with a stale pin.
+    """
+    from importlib.metadata import version
+
+    args = server_entry()["superhumandoc"]["args"]
+    assert args[1].endswith(f"@v{version('superhumandoc-mcp')}")
+
+
+def test_a_non_utf8_file_fails_one_artifact_and_not_the_run(tmp_path: Path) -> None:
+    """A `.env` saved in a legacy encoding must not abort the whole command.
+
+    `UnicodeDecodeError` is a `ValueError`, so it escapes an `OSError`-only
+    guard as a traceback -- taking the other two artifacts with it and exiting
+    with neither the report nor the documented exit code.
+    """
+    (tmp_path / ".env").write_bytes(b"SHDOC_API_KEY=caf\xe9\n")
+    out, err = io.StringIO(), io.StringIO()
+
+    assert run_init(tmp_path, out, err) == 2
+
+    printed = out.getvalue()
+    assert printed.startswith("failed .env:")
+    assert "wrote .mcp.json" in printed and "wrote .gitignore" in printed
+    assert (tmp_path / ".mcp.json").is_file() and (tmp_path / ".gitignore").is_file()
+
+
+def test_an_exported_key_is_not_shadowed_by_an_appended_blank(
+    tmp_path: Path,
+) -> None:
+    """The end-to-end form of the worst failure this command could have.
+
+    A working project whose `.env` uses `export` must not come back from `init`
+    with its live token shadowed by the template's empty assignment.
+    """
+    env = tmp_path / ".env"
+    env.write_text(
+        "export SHDOC_API_KEY=tok_fake_for_test\nexport SHDOC_DOC_ID=doc-123\n",
+        encoding="utf-8",
+    )
+
+    scaffold_env(tmp_path)
+
+    from dotenv import dotenv_values
+
+    resolved = dict(dotenv_values(env))
+    assert resolved["SHDOC_API_KEY"] == "tok_fake_for_test"
+    assert resolved["SHDOC_DOC_ID"] == "doc-123"

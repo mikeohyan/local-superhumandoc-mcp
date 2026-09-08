@@ -8,6 +8,9 @@ stops being cosmetic and becomes a format these tests have to hold in place.
 import tomllib
 from pathlib import Path
 
+import pytest
+
+import superhumandoc_mcp.init as init_module
 from superhumandoc_mcp.init import key_present, template_blocks, template_text
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,8 +62,36 @@ def test_key_present_rejects_a_mention_that_is_not_an_assignment() -> None:
     assert not key_present(text, "SHDOC_LOG_LEVEL")
 
 
-def test_key_present_does_not_honour_export() -> None:
-    """`load_config` reads through `dotenv_values`, which ignores `export`, so
-    such a line is not a key this server can read and must not suppress the
-    append."""
-    assert not key_present("export SHDOC_LOG_LEVEL=INFO\n", "SHDOC_LOG_LEVEL")
+def test_key_present_honours_export() -> None:
+    """`dotenv_values` honours `export` -- measured against the pinned
+    dependency, not assumed.
+
+    Treating such a line as absent would append the template's empty
+    `SHDOC_API_KEY=` beside a live `export SHDOC_API_KEY=<token>`, and
+    `dotenv_values` takes the last assignment. The token stays visible in the
+    file while the server reads an empty string and refuses to start.
+    """
+    for line in ("export SHDOC_LOG_LEVEL=INFO", "  export  SHDOC_LOG_LEVEL=INFO",
+                 "# export SHDOC_LOG_LEVEL=INFO"):
+        assert key_present(f"{line}\n", "SHDOC_LOG_LEVEL"), line
+
+
+def test_the_packaged_template_wins_over_the_source_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The packaged branch is otherwise never exercised.
+
+    Every test runs in an editable checkout, where the `importlib.resources`
+    lookup misses and the source-tree fallback answers -- so deleting the
+    packaged lookup entirely would leave the suite green while breaking every
+    real install, where the fallback path does not exist at all.
+    """
+    packaged = tmp_path / "env.example"
+    packaged.write_text("PACKAGED TEMPLATE\n", encoding="utf-8")
+
+    class _Anchor:
+        def joinpath(self, _name: str) -> Path:
+            return packaged
+
+    monkeypatch.setattr(init_module, "files", lambda _package: _Anchor())
+    assert template_text() == "PACKAGED TEMPLATE\n"

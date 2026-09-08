@@ -17,13 +17,22 @@ _TEMPLATE = "templates/env.example"
 _SERVER_KEY = "superhumandoc"
 _REPO = "https://github.com/mikeohyan/local-superhumandoc-mcp"
 
-# A `SHDOC_` assignment at the start of a line, commented out or not. The same
-# expression finds a key's block in the template and decides whether a target
-# file already carries that key, so a `.env` this command wrote is recognised
-# by this command on a re-run. `export KEY=` is deliberately not matched:
-# `load_config` reads through `dotenv_values`, which does not honour `export`
-# either, so such a line is not a key this server can read.
-_ASSIGNMENT = re.compile(r"^[ \t]*#?[ \t]*(SHDOC_[A-Z0-9_]+)[ \t]*=")
+# A `SHDOC_` assignment at the start of a line, commented out or not, with or
+# without an `export` prefix. The same expression finds a key's block in the
+# template and decides whether a target file already carries that key, so a
+# `.env` this command wrote is recognised by this command on a re-run.
+#
+# `export` is matched because `dotenv_values` honours it -- measured against
+# the pinned dependency, not assumed. Missing it would be the worst bug this
+# command could have: a project whose `.env` reads
+# `export SHDOC_API_KEY=<token>` would look like it had no such key, get the
+# template's empty `SHDOC_API_KEY=` appended, and `dotenv_values` takes the
+# LAST assignment -- silently shadowing a live token with an empty string.
+# Nothing is deleted, so nothing looks wrong, and the server then dies at
+# startup insisting the key is not set.
+_ASSIGNMENT = re.compile(
+    r"^[ \t]*(?:#[ \t]*)?(?:export[ \t]+)?(SHDOC_[A-Z0-9_]+)[ \t]*="
+)
 
 
 class InitError(Exception):
@@ -84,11 +93,16 @@ def template_blocks(text: str) -> list[tuple[str, str]]:
 def key_present(text: str, key: str) -> bool:
     """Whether `text` already assigns `key` at the start of some line.
 
-    A commented-out assignment counts. A project that deliberately commented an
-    optional key out has made a decision, and appending a second copy would
-    both override it and leave the reader two lines to reconcile.
+    A commented-out assignment counts, and so does an `export` prefix. A
+    project that deliberately commented an optional key out has made a
+    decision, and appending a second copy would both override it and leave the
+    reader two lines to reconcile. An `export` line is a live assignment that
+    `dotenv_values` reads, so appending beside it would shadow a real value.
     """
-    pattern = re.compile(rf"^[ \t]*#?[ \t]*{re.escape(key)}[ \t]*=", re.MULTILINE)
+    pattern = re.compile(
+        rf"^[ \t]*(?:#[ \t]*)?(?:export[ \t]+)?{re.escape(key)}[ \t]*=",
+        re.MULTILINE,
+    )
     return pattern.search(text) is not None
 
 
@@ -237,7 +251,11 @@ def scaffold_gitignore(cwd: Path) -> Outcome:
 def _attempt(artifact: str, action: Callable[[], Outcome]) -> Outcome:
     try:
         return action()
-    except (OSError, InitError, PackageNotFoundError) as error:
+    # `UnicodeDecodeError` is a `ValueError`, not an `OSError`, so it has to be
+    # named: a `.env` or `.gitignore` saved in a non-UTF-8 encoding would
+    # otherwise escape as a traceback and abort the remaining artifacts --
+    # exactly the whole-run gate per-artifact independence exists to prevent.
+    except (OSError, UnicodeDecodeError, InitError, PackageNotFoundError) as error:
         return Outcome(artifact, "failed", str(error) or type(error).__name__)
 
 
