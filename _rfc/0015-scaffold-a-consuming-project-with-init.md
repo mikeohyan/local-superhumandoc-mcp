@@ -65,8 +65,9 @@ about the shape rather than a reason not to build it.
 The scaffolding conventions themselves are settled, though, and worth borrowing.
 `uv init` refuses outright when a `pyproject.toml` already exists rather than
 prompting or overwriting. `terraform init` is documented as safe to re-run and
-never deletes existing configuration. Across the tools surveyed, no tool treats
-"the file already existed, so I did nothing" as a success.
+never deletes existing configuration — this RFC follows `terraform init`, not
+`uv init`, on that point: a directory where everything already exists is the
+steady state a re-run is supposed to reach, not a refusal condition.
 
 ## Decision
 
@@ -95,7 +96,10 @@ project that already carries a `.mcp.json` — because it registers some other
 MCP server, an ordinary case — no longer blocks its `.env` from being
 scaffolded, and a project with an `.env` left over from an earlier partial run
 still gets its `.mcp.json` written. Collision on one artifact says nothing about
-the others.
+the others. That per-artifact independence is also what makes `init` safe to
+re-run on a directory that is only partly scaffolded: a second run writes
+whatever is still missing and leaves what already exists untouched, rather than
+refusing outright the way a whole-run guard would.
 
 There is no promise that a run produces every artifact or leaves the directory
 exactly as it found it — pre-checking existence never delivered that anyway,
@@ -104,10 +108,28 @@ rollback, and this RFC does not claim otherwise. What `init` guarantees instead
 is that it reports, per artifact, what it wrote and what it skipped and why —
 `wrote .env`, `skipped .mcp.json: already exists` — so the report, not an
 atomicity guarantee, is what makes a partial run recoverable: the user can see
-exactly which artifact still needs attention rather than re-running blind.
-`init` exits with `SystemExit(2)`, the same code `__main__.py` already uses for
-configuration failure, only when it wrote nothing at all; it exits `0` whenever
-it wrote at least one artifact, even if another was skipped.
+exactly which artifact still needs attention rather than re-running blind. That
+report is printed to stdout, one line per artifact. This looks like it breaks a
+rule this codebase otherwise enforces everywhere — `__main__.py` sends even its
+startup diagnostics to stderr, with a comment that stdout is reserved for the
+MCP transport — but that rule protects the serving path, and `init` is not on
+it: it runs to completion and exits before any transport exists, so there is no
+protocol stream on stdout to corrupt, and the report is not a diagnostic beside
+one but the entire output a person reading a terminal is here for. A future
+change should not fold this into stderr on the strength of the general rule;
+the rule and this command are answering different questions.
+
+Skipping every artifact because each one was already correct is success, not
+failure. `init` exits `0` whenever every artifact either was written this run
+or was already present, with the report saying so plainly — three
+`skipped: already exists` lines rather than three `wrote` lines when there was
+nothing left to do — echoing `terraform init`'s re-run guarantee from the
+Context above rather than contradicting it: finding nothing to do is the
+expected steady state of a directory `init` has already finished, not an error
+condition. `SystemExit(2)`, the same code `__main__.py` already uses for
+configuration failure, is reserved for genuine failure instead: an artifact
+that could not be written because of a permissions or I/O error. That failure
+prints to stderr, distinct from the stdout report above.
 
 `.gitignore` gets different treatment, but by policy rather than by exception —
 appending a line destroys nothing an existing `.gitignore` holds, so there is
@@ -166,10 +188,11 @@ emits keeps parsing exactly as it does today and keeps reaching the server path.
 Unrecognized arguments continue to fail closed with a non-zero exit rather than
 being reinterpreted.
 
-Errors follow the precedent already in `__main__.py` rather than RFC 0007's
-`ToolError` convention, which cannot apply: `ToolError` carries a message to a
-model inside a running MCP session, and `init` finishes before any session
-exists. It prints to stderr and exits with `SystemExit(2)`, the same code
+Errors — the genuine-failure case above, not the per-artifact report — follow
+the precedent already in `__main__.py` rather than RFC 0007's `ToolError`
+convention, which cannot apply: `ToolError` carries a message to a model inside
+a running MCP session, and `init` finishes before any session exists. A failure
+prints to stderr and `init` exits with `SystemExit(2)`, the same code
 `__main__.py` already raises for configuration failure, rather than inventing a
 second convention for what is, at bottom, the same kind of failure.
 
