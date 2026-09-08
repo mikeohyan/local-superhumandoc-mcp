@@ -4,10 +4,12 @@ import io
 import json
 import os
 import stat
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
 import pytest
 
+import superhumandoc_mcp.init as init_module
 from superhumandoc_mcp.init import (
     entry_fragment,
     run_init,
@@ -196,3 +198,43 @@ def test_one_artifact_failing_does_not_stop_the_others(tmp_path: Path) -> None:
     assert printed.startswith("failed .env:")
     assert "wrote .mcp.json" in printed and "wrote .gitignore" in printed
     assert "superhumandoc-mcp: could not write .env:" in err.getvalue()
+
+
+def test_the_offered_fragment_starts_at_column_zero() -> None:
+    """Parsing it is not a strong enough check on its own.
+
+    The fragment is unwrapped from a dumped object, so it inherits that
+    object's indentation unless it is deliberately dedented -- and a fragment
+    indented one level too deep still parses as valid JSON while looking
+    broken the moment someone pastes it under `mcpServers`. Proven by
+    mutation: removing the dedent left every other test green.
+    """
+    assert entry_fragment().splitlines()[0] == '"superhumandoc": {'
+
+
+def test_a_missing_installation_fails_only_the_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`importlib.metadata.version` raises in an uninstalled source tree.
+
+    Per-artifact independence makes that the registration's failure rather
+    than the run's: the other two artifacts are still written, no half-formed
+    `.mcp.json` is left behind, and the exit code still reports that something
+    failed. Without this test the whole path is uncovered -- dropping
+    `PackageNotFoundError` from the caught set leaves the suite green while
+    turning the failure into a traceback.
+    """
+
+    def _uninstalled(_name: str) -> str:
+        raise PackageNotFoundError("superhumandoc-mcp")
+
+    monkeypatch.setattr(init_module, "version", _uninstalled)
+    out, err = io.StringIO(), io.StringIO()
+
+    assert run_init(tmp_path, out, err) == 2
+
+    printed = out.getvalue()
+    assert "failed .mcp.json:" in printed
+    assert "wrote .env" in printed and "wrote .gitignore" in printed
+    assert not (tmp_path / ".mcp.json").exists()
+    assert "superhumandoc-mcp: could not write .mcp.json:" in err.getvalue()
