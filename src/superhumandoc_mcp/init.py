@@ -4,12 +4,18 @@ Offline, credential-free, and run by a person before any MCP session exists.
 The rules here are set by the `project-setup` topic; see `_rfc/README.md`.
 """
 
+import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from importlib.resources import files
 from pathlib import Path
+from typing import TextIO
 
 _TEMPLATE = "templates/env.example"
+_SERVER_KEY = "superhumandoc"
+_REPO = "https://github.com/mikeohyan/local-superhumandoc-mcp"
 
 # A `SHDOC_` assignment at the start of a line, commented out or not. The same
 # expression finds a key's block in the template and decides whether a target
@@ -153,3 +159,119 @@ def scaffold_env(cwd: Path) -> Outcome:
     # The mode of a file this command did not create stays the project's.
     count = len(missing)
     return Outcome(".env", "appended", f"{count} key{'' if count == 1 else 's'} added")
+
+
+def server_entry() -> dict[str, dict[str, object]]:
+    """The registration stanza, pinned to the version doing the scaffolding.
+
+    The `packaging` topic requires a tag pin rather than a branch and forbids
+    moving a published tag, so version X.Y.Z and tag vX.Y.Z name the same code
+    permanently: a scaffolded project pins the exact server that scaffolded it.
+    In an uninstalled source tree `version` raises `PackageNotFoundError`,
+    which `_attempt` treats as this artifact's failure rather than the run's.
+    """
+    pin = version("superhumandoc-mcp")
+    return {
+        _SERVER_KEY: {
+            "type": "stdio",
+            "command": "uvx",
+            "args": ["--from", f"git+{_REPO}@v{pin}", "superhumandoc-mcp"],
+        }
+    }
+
+
+def entry_fragment() -> str:
+    """The stanza as a fragment ready to paste under `mcpServers`.
+
+    Dumped as an object and then unwrapped rather than hand-assembled, so the
+    quoting and escaping come from `json` and cannot drift from what
+    `scaffold_mcp_json` writes into a file it creates.
+    """
+    body = json.dumps(server_entry(), indent=2).splitlines()[1:-1]
+    return "\n".join(line[2:] for line in body)
+
+
+def scaffold_mcp_json(cwd: Path) -> Outcome:
+    """Create `.mcp.json`, or print what to add to the one already there.
+
+    JSON cannot be appended to: adding a key means parsing and re-serialising
+    the whole document, which rewrites bytes this command did not write and
+    discards whatever formatting the project chose. So an existing file is left
+    exactly as it is -- and the stanza is printed instead, making the remaining
+    step a copy and paste rather than a research task.
+    """
+    entry = server_entry()
+    path = cwd / ".mcp.json"
+    if path.exists():
+        stanza = (
+            '  add this under the top-level "mcpServers" key:\n\n'
+            + "\n".join(f"  {line}" for line in entry_fragment().splitlines())
+        )
+        return Outcome(".mcp.json", "skipped", "already exists", stanza)
+    path.write_text(
+        json.dumps({"mcpServers": entry}, indent=2) + "\n", encoding="utf-8"
+    )
+    return Outcome(".mcp.json", "wrote")
+
+
+def scaffold_gitignore(cwd: Path) -> Outcome:
+    """Make sure `.env` is ignored, creating the file if there is none.
+
+    Written even outside a git repository: the ignore rule is what keeps the
+    token safe on the day the directory becomes one. The presence test is an
+    exact match against a stripped line, so a project that ignores `.env`
+    through a broader pattern such as `.env*`, or through a global ignore file,
+    gets a redundant but harmless extra line rather than a silent skip.
+    """
+    path = cwd / ".gitignore"
+    if not path.exists():
+        path.write_text(".env\n", encoding="utf-8")
+        return Outcome(".gitignore", "wrote")
+    lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    if ".env" in lines:
+        return Outcome(".gitignore", "skipped", "already ignores .env")
+    _append(path, ".env")
+    return Outcome(".gitignore", "appended", "1 line added")
+
+
+def _attempt(artifact: str, action: Callable[[], Outcome]) -> Outcome:
+    try:
+        return action()
+    except (OSError, InitError, PackageNotFoundError) as error:
+        return Outcome(artifact, "failed", str(error) or type(error).__name__)
+
+
+def run_init(cwd: Path, out: TextIO, err: TextIO) -> int:
+    """Scaffold `cwd`, report on every artifact, and return the exit code.
+
+    Every artifact is attempted even after an earlier one fails. Stopping would
+    treat the first artifact as a gate on the others, which is the opposite of
+    the per-artifact independence this command is built on, and would leave the
+    user knowing less about the directory than a full report gives them.
+
+    The report goes to stdout rather than stderr. That inverts the rule
+    `__main__` follows everywhere else, and deliberately: the rule protects the
+    MCP transport, this command exits before any transport exists, and the
+    report is not a diagnostic beside a protocol stream but the entire output a
+    person at a terminal is here for.
+
+    A failure is printed on both streams on purpose -- on stdout so the
+    per-artifact report is complete, on stderr so a caller capturing only
+    stderr still sees it. Do not collapse that into one stream.
+    """
+    outcomes = [
+        _attempt(".env", lambda: scaffold_env(cwd)),
+        _attempt(".mcp.json", lambda: scaffold_mcp_json(cwd)),
+        _attempt(".gitignore", lambda: scaffold_gitignore(cwd)),
+    ]
+    for outcome in outcomes:
+        print(outcome.line, file=out)
+        if outcome.stanza:
+            print(outcome.stanza, file=out)
+        if outcome.failed:
+            print(
+                f"superhumandoc-mcp: could not write {outcome.artifact}: "
+                f"{outcome.detail}",
+                file=err,
+            )
+    return 2 if any(outcome.failed for outcome in outcomes) else 0

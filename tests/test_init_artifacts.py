@@ -1,12 +1,22 @@
 """What `init` does to each of the three files it touches."""
 
+import io
+import json
 import os
 import stat
 from pathlib import Path
 
 import pytest
 
-from superhumandoc_mcp.init import scaffold_env, template_text
+from superhumandoc_mcp.init import (
+    entry_fragment,
+    run_init,
+    scaffold_env,
+    scaffold_gitignore,
+    scaffold_mcp_json,
+    server_entry,
+    template_text,
+)
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
 
@@ -98,3 +108,91 @@ def test_an_existing_envs_mode_is_left_alone(tmp_path: Path) -> None:
     env.chmod(0o644)
     scaffold_env(tmp_path)
     assert stat.S_IMODE(env.stat().st_mode) == 0o644
+
+
+def test_writes_a_registration_pinned_to_a_real_tag(tmp_path: Path) -> None:
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == "wrote .mcp.json"
+    document = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+    server = document["mcpServers"]["superhumandoc"]
+    assert server["type"] == "stdio" and server["command"] == "uvx"
+    assert server["args"][0] == "--from"
+    assert server["args"][1].startswith("git+https://") and "@v" in server["args"][1]
+    assert server["args"][2] == "superhumandoc-mcp"
+    assert "env" not in server
+
+
+def test_the_registration_carries_no_secret(tmp_path: Path) -> None:
+    scaffold_mcp_json(tmp_path)
+    text = (tmp_path / ".mcp.json").read_text(encoding="utf-8")
+    assert "SHDOC_API_KEY" not in text and "SHDOC_DOC_ID" not in text
+
+
+def test_an_existing_mcp_json_is_untouched_and_the_stanza_is_offered(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / ".mcp.json"
+    before = '{\n    "mcpServers": {"other": {"command": "x"}}\n}\n'
+    path.write_text(before, encoding="utf-8")
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == "skipped .mcp.json: already exists"
+    assert path.read_text(encoding="utf-8") == before
+    assert "mcpServers" in outcome.stanza
+
+
+def test_the_offered_fragment_is_valid_json_once_wrapped() -> None:
+    """It is printed for a human to paste, so it must parse as what would have
+    been written rather than merely look like it."""
+    assert json.loads("{" + entry_fragment() + "}") == server_entry()
+
+
+def test_creates_gitignore_when_absent(tmp_path: Path) -> None:
+    assert scaffold_gitignore(tmp_path).line == "wrote .gitignore"
+    assert (tmp_path / ".gitignore").read_text(encoding="utf-8") == ".env\n"
+
+
+def test_appends_env_to_an_existing_gitignore(tmp_path: Path) -> None:
+    path = tmp_path / ".gitignore"
+    path.write_text("__pycache__/\n", encoding="utf-8")
+    assert scaffold_gitignore(tmp_path).line == "appended .gitignore: 1 line added"
+    lines = [l.strip() for l in path.read_text(encoding="utf-8").splitlines()]
+    assert "__pycache__/" in lines and ".env" in lines
+
+
+def test_an_existing_env_line_is_not_duplicated(tmp_path: Path) -> None:
+    path = tmp_path / ".gitignore"
+    path.write_text("  .env  \n", encoding="utf-8")
+    assert scaffold_gitignore(tmp_path).line == "skipped .gitignore: already ignores .env"
+    assert path.read_text(encoding="utf-8").count(".env") == 1
+
+
+def test_a_clean_run_reports_three_lines_and_exits_zero(tmp_path: Path) -> None:
+    out, err = io.StringIO(), io.StringIO()
+    assert run_init(tmp_path, out, err) == 0
+    assert out.getvalue().splitlines()[:3] == [
+        "wrote .env", "wrote .mcp.json", "wrote .gitignore",
+    ]
+    assert err.getvalue() == ""
+
+
+def test_re_running_a_finished_directory_is_success(tmp_path: Path) -> None:
+    """Finding nothing left to do is the steady state, not an error."""
+    out, err = io.StringIO(), io.StringIO()
+    run_init(tmp_path, out, err)
+    out2, err2 = io.StringIO(), io.StringIO()
+    assert run_init(tmp_path, out2, err2) == 0
+    assert "skipped .env: already exists" in out2.getvalue()
+    assert "skipped .mcp.json: already exists" in out2.getvalue()
+    assert "skipped .gitignore: already ignores .env" in out2.getvalue()
+
+
+def test_one_artifact_failing_does_not_stop_the_others(tmp_path: Path) -> None:
+    """Per-artifact independence: a person recovering from a failure needs the
+    state of all three, not just the first one that broke."""
+    (tmp_path / ".env").mkdir()          # a directory where a file must go
+    out, err = io.StringIO(), io.StringIO()
+    assert run_init(tmp_path, out, err) == 2
+    printed = out.getvalue()
+    assert printed.startswith("failed .env:")
+    assert "wrote .mcp.json" in printed and "wrote .gitignore" in printed
+    assert "superhumandoc-mcp: could not write .env:" in err.getvalue()
