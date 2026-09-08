@@ -45,13 +45,12 @@ project that *uses* it is below.
 
 ## Installing in a project
 
-**Not yet installable** — the package builds and the console script serves MCP
+**Ready to install.** The package builds and the console script serves MCP
 over stdio, registering the full tool surface described above. The `@v0.1.0`
-in the example below is not yet reachable: this repository carries no
-version tag, and the pinned-tag install was verified against a scratch copy
-rather than against this one. What follows is the shape decided by the
-`config-resolution` and `packaging` topics, and the one operational
-requirement that is easy to get wrong.
+in the example below names this repository's first tagged release, and the
+pinned-tag install has been exercised against this remote. What follows is
+the shape decided by the `config-resolution` and `packaging` topics, and the
+one operational requirement that is easy to get wrong.
 
 A consuming project commits a `.mcp.json` carrying no secrets:
 
@@ -63,7 +62,7 @@ A consuming project commits a `.mcp.json` carrying no secrets:
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/USER/REPO@v0.1.0",
+        "git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.1.0",
         "superhumandoc-mcp"
       ]
     }
