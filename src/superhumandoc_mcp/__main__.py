@@ -26,6 +26,12 @@ def _configure_logging(config: Config) -> None:
     from reaching root's handlers a second time. The logger's handlers are
     replaced outright, not appended to, so a second call (or a repeated
     lowering of the level) does not accumulate duplicate output.
+
+    Because of `propagate = False`, pytest's `caplog` fixture -- which
+    listens on the root logger -- never sees anything emitted on the
+    `superhumandoc_mcp` logger, even inside `caplog.at_level(...)`. A test
+    that wants to assert on this package's log output should attach its own
+    handler to the `superhumandoc_mcp` logger instead of relying on `caplog`.
     """
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))

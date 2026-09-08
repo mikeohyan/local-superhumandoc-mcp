@@ -65,15 +65,38 @@ def test_configure_logging_never_writes_to_stdout():
 
 
 def test_configure_logging_leaves_the_root_logger_untouched():
-    """The regression this fix exists to prevent: raising the package logger's
-    level must not raise root's, or every library's own logging (httpx, for
-    one) switches on for a user who only meant to control this server's own
-    output.
+    """`_configure_logging` must not change root's own level -- it only sets
+    the level on the `superhumandoc_mcp` logger.
     """
     root = logging.getLogger()
     root.setLevel(logging.WARNING)
     _configure_logging(_config("DEBUG"))
     assert root.level == logging.WARNING
+
+
+class _Recorder(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+def test_configure_logging_does_not_propagate_to_root():
+    """The regression this fix exists to prevent: without `propagate = False`,
+    records emitted on the `superhumandoc_mcp` logger also reach root's own
+    handlers, and the earlier httpx-noise regression returns.
+    """
+    root = logging.getLogger()
+    recorder = _Recorder()
+    root.addHandler(recorder)
+    try:
+        _configure_logging(_config("DEBUG"))
+        logging.getLogger(_LOGGER_NAME).debug("should not reach root")
+        assert recorder.records == []
+    finally:
+        root.removeHandler(recorder)
 
 
 def test_configure_logging_does_not_accumulate_handlers():

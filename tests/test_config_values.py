@@ -157,6 +157,12 @@ def test_blank_log_level_falls_back_to_info(tmp_path):
 
 
 def test_whitespace_only_log_level_falls_back_to_info(tmp_path):
+    """`dotenv_values` would strip a whitespace-only value in the file to `""`
+    before `load_config` ever saw it, so the value is delivered through the
+    environment mapping instead, to actually exercise `load_config`'s own
+    `.strip()`.
+    """
     env = tmp_path / ".env"
-    env.write_text("SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\nSHDOC_LOG_LEVEL=   \n")
-    assert load_config(str(env), {}, tmp_path).log_level == "INFO"
+    env.write_text("SHDOC_API_KEY=k\nSHDOC_DOC_ID=d\n")
+    config = load_config(str(env), {"SHDOC_LOG_LEVEL": "   "}, tmp_path)
+    assert config.log_level == "INFO"

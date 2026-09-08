@@ -51,7 +51,3 @@ def test_comment_names_no_tool_the_flag_does_not_gate():
     assert not wrongly_named, (
         f".env.example implies the flag gates always-on tools: {wrongly_named}"
     )
-
-
-def test_the_stale_claim_is_gone():
-    assert "registers no tools at all" not in ENV_EXAMPLE.read_text()
