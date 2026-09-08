@@ -12,6 +12,7 @@ from superhumandoc_mcp.config import (
     Config, ConfigError, format_startup_line, load_config,
 )
 from superhumandoc_mcp.errors import AuthFailure, ClientError
+from superhumandoc_mcp.init import run_init
 from superhumandoc_mcp.server import build_server
 
 
@@ -45,7 +46,21 @@ def _configure_logging(config: Config) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="superhumandoc-mcp")
     parser.add_argument("--env-file", dest="env_file", default=None)
+    # Registered without `required=True` on purpose: the bare, subcommand-free
+    # invocation that every deployed .mcp.json emits must keep parsing exactly
+    # as it did before this subcommand existed, and keep reaching the server
+    # path below. Unrecognised arguments still fail closed.
+    subcommands = parser.add_subparsers(dest="command")
+    subcommands.add_parser(
+        "init", help="scaffold the current directory into a consuming project"
+    )
     args = parser.parse_args()
+
+    # Before configuration resolution, deliberately: `init` is offline, handles
+    # no credentials, and exists to serve the empty directory in which
+    # `load_config` would have nothing to find.
+    if args.command == "init":
+        raise SystemExit(run_init(Path.cwd(), sys.stdout, sys.stderr))
 
     try:
         config = load_config(args.env_file, os.environ, Path.cwd())
