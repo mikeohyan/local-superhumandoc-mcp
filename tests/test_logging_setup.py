@@ -36,7 +36,15 @@ def test_configure_logging_applies_the_resolved_level():
 
 
 def test_configure_logging_can_lower_the_level_again():
-    _configure_logging(_config("DEBUG"))
+    """`basicConfig` is a no-op once the root logger has handlers -- and
+    pytest's own logging plugin has already installed one before this test
+    runs, at level WARNING. Two `_configure_logging` calls that both land on
+    WARNING would pass vacuously against that default without proving
+    anything moved. Seed the level directly (bypassing `_configure_logging`)
+    to a value pytest did not choose, so the assertion can only pass if the
+    `force=True` call actually overrode it.
+    """
+    logging.getLogger().setLevel(logging.DEBUG)
     _configure_logging(_config("WARNING"))
     assert logging.getLogger().level == logging.WARNING
 
