@@ -6,6 +6,7 @@ comment is not, this fails.
 """
 
 import asyncio
+import re
 from pathlib import Path
 
 from superhumandoc_mcp.config import Config
@@ -40,7 +41,11 @@ def test_every_gated_tool_is_named_in_the_comment():
 def test_comment_names_no_tool_the_flag_does_not_gate():
     always_on = _tool_names(allow_destructive=False)
     text = ENV_EXAMPLE.read_text()
-    wrongly_named = sorted(name for name in always_on if name in text)
+    wrongly_named = sorted(
+        name
+        for name in always_on
+        if re.search(rf"\b{re.escape(name)}\b", text)
+    )
     assert not wrongly_named, (
         f".env.example implies the flag gates always-on tools: {wrongly_named}"
     )
