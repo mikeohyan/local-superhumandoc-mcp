@@ -51,3 +51,24 @@ def test_names_the_restrictive_rule_rather_than_the_losing_source() -> None:
         _config(sources={"SHDOC_ALLOW_DESTRUCTIVE": "restricted"})
     )
     assert "SHDOC_ALLOW_DESTRUCTIVE=restricted" in line
+
+
+def test_the_sources_field_is_sorted_rather_than_insertion_ordered() -> None:
+    """The keys reach this function from a set union, whose iteration order
+    varies between processes. Sorting is what makes two startup lines from
+    the same configuration comparable, which is the whole point of the line.
+    The sources below are deliberately given in non-alphabetical order.
+    """
+    line = format_startup_line(
+        _config(
+            sources={
+                "SHDOC_LOG_LEVEL": "file",
+                "SHDOC_DOC_ID": "file",
+                "SHDOC_API_KEY": "environment",
+            }
+        )
+    )
+    assert (
+        "[SHDOC_API_KEY=environment SHDOC_DOC_ID=file SHDOC_LOG_LEVEL=file]"
+        in line
+    )
