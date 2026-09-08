@@ -28,7 +28,7 @@ decision may not yet be accepted.
 | `evidence-location` | 0003 | Implemented | `_rfc/archive/implemented/0003-evidence-and-reference-material.md` |
 | `failure-policy` | 0010 | Implemented | `_rfc/archive/implemented/0010-failure-classification-and-retry-policy.md` |
 | `packaging` | 0007 | Implemented | `_rfc/archive/implemented/0007-packaging-and-distribution.md` |
-| `project-setup` | 0015 | Accepted | `_rfc/0015-scaffold-a-consuming-project-with-init.md` |
+| `project-setup` | 0015 | Implemented | `_rfc/archive/implemented/0015-scaffold-a-consuming-project-with-init.md` |
 | `request-sizing` | 0014 | Implemented | `_rfc/archive/implemented/0014-measure-the-row-instead-of-estimating-it.md` |
 | `rfc-process` | 0001 | Implemented | `_rfc/archive/implemented/0001-rfc-process.md` |
 | `server-ownership` | 0004 | Implemented | `_rfc/archive/implemented/0004-build-local-doc-scoped-server.md` |
@@ -40,19 +40,15 @@ decision may not yet be accepted.
 fallbacks: shipped code written against them is described by their
 replacements, which carry those parts forward deliberately.
 
-Every topic except `project-setup` is Implemented as of 2026-09-08 — the whole
-built surface. `project-setup` is Accepted and not yet shipped: a new subject
-rather than a revision of a built one. That is a snapshot, not a rule: the next decision on any
-subject rewrites its row here and appears in the in-flight table below until it
-ships.
+Every topic is Implemented as of 2026-09-08, and nothing is in flight. That is
+a snapshot, not a rule: the next decision on any subject rewrites its row here
+and appears in the in-flight table below until it ships.
 
 ## In flight — `_rfc/`
 
 Proposed and Accepted: decided or awaiting decision, not yet shipped.
 
-| # | Title | Topic | Status | Decided | Path |
-|---|---|---|---|---|---|
-| 0015 | Scaffold a consuming project with an `init` subcommand | `project-setup` | Accepted | 2026-09-08 | `_rfc/0015-scaffold-a-consuming-project-with-init.md` |
+Nothing is in flight.
 
 ## Implemented — `_rfc/archive/implemented/`
 
@@ -72,6 +68,7 @@ works today.
 | 0012 | Poll asynchronous operations on one bounded loop, and give export its own budget | `async-operations` | Implemented | 2026-09-06 | `_rfc/archive/implemented/0012-async-operation-polling-and-export-budget.md` |
 | 0013 | Write page content as HTML, and never send a read back as a write | `tool-surface` | Implemented | 2026-09-06 | `_rfc/archive/implemented/0013-html-content-and-the-read-write-cycle.md` |
 | 0014 | Measure a row in the units the API counts, and report what a deadline left undone | `request-sizing` | Implemented | 2026-09-06 | `_rfc/archive/implemented/0014-measure-the-row-instead-of-estimating-it.md` |
+| 0015 | Scaffold a consuming project with an `init` subcommand | `project-setup` | Implemented | 2026-09-08 | `_rfc/archive/implemented/0015-scaffold-a-consuming-project-with-init.md` |
 
 ## Retired — `_rfc/archive/retired/`
 

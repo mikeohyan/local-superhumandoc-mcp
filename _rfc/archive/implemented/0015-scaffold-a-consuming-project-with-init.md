@@ -1,13 +1,13 @@
 ---
 rfc: 0015
 title: Scaffold a consuming project with an `init` subcommand
-status: Accepted
+status: Implemented
 created: 2026-09-08
 decided: 2026-09-08
 supersedes:
 superseded_by:
 topic: project-setup
-commits: []
+commits: [971b6c9, 828d50f, 3a25bfd, 6665f1a, 33d39bc, 7925307, 3e9ed04, c90d32d, 7da23b1]
 tags: [architecture, cli, onboarding, packaging, configuration]
 ---
 
@@ -433,4 +433,58 @@ but the RFC should not be read as citing precedent it does not have.
 
 ## Implementation notes
 
-Left empty at Proposed.
+Shipped in `v0.2.0`. The prerequisites this RFC named as blocking — cutting
+`v0.1.0`, wiring `SHDOC_LOG_LEVEL`, and correcting the stale claims in
+`.env.example` and the README — were cleared first and shipped in `v0.1.0`.
+
+Four things diverged from the Decision, and one of them was a real bug caught
+only at the final review.
+
+**The template is read from the wheel, with a source-tree fallback.** The
+Decision names `importlib.resources.files("superhumandoc_mcp")` alone. That
+resolves correctly in a built wheel and *not* in the editable install every
+contributor runs: hatchling applies `force-include` when it builds a wheel, not
+when it points a `.pth` at `src/`, so the anchor lands in the source tree where
+`templates/` does not exist. `template_text` therefore tries the packaged path
+first and falls back to the repository-root `.env.example`. This keeps the
+property the Decision actually argued for — one copy of the template on disk,
+so drift is impossible — rather than the mechanism it named. Verified by
+installing the built wheel into a clean virtualenv, where the fallback path
+does not exist and the packaged lookup is provably what answered.
+
+**`export KEY=` counts as an assignment.** The Decision says a key is present
+if it "appears in the file as an assignment at the start of a line, whether or
+not that line is commented out". The implementation plan first read that as
+excluding `export`, reasoning that `dotenv_values` ignores the prefix. That
+reasoning was wrong: `dotenv_values` strips a leading `export `, and on a
+duplicated key it takes the *last* assignment. The excluding version would have
+found no `SHDOC_API_KEY` in a working `.env` written in `export` form, appended
+the template's empty `SHDOC_API_KEY=` after it, and left the server reading an
+empty string with the real token still sitting in the file — failing startup
+with a message insisting the key was not set. Accepting `export` is both the
+correct behaviour and the more faithful reading of the frozen text, since such
+a line is an assignment at the start of a line, and it is what the Decision's
+promise that nothing already present is "changed, reordered, or duplicated"
+requires.
+
+**`.env.example`'s paragraph structure is now load-bearing.** Appending "that
+key's template block" needs a block boundary, and the template has no markers.
+A block is a blank-line-separated paragraph containing an assignment for that
+key; paragraphs that assign nothing are prose and are copied on create but
+never appended. `tests/test_init_template.py` holds that structure in place.
+The template's own header was also reworded, because it opened by telling the
+reader to copy it to `.env` — nonsense once `init` ships it *as* a `.env` — and
+its two `_rfc/README.md` pointers were removed, since they name nothing a
+consuming project has.
+
+**`PackageNotFoundError` is the registration's failure, not the run's**, and
+`UnicodeDecodeError` is caught alongside it. The Decision does not mention
+either. The first arises in an uninstalled source tree; the second when a
+`.env` or `.gitignore` is saved in a legacy encoding, and because it is a
+`ValueError` rather than an `OSError` it originally escaped the per-artifact
+guard as a traceback, aborting the remaining artifacts — the exact whole-run
+gate that per-artifact independence exists to prevent.
+
+The version/tag lockstep obligation described in Consequences is now live:
+`init` writes `@v0.2.0` because `pyproject.toml` says `0.2.0`, and that tag was
+cut in the same act as the merge rather than afterwards.
