@@ -93,17 +93,10 @@ commit to look up in the first place.
 ## Which decision is affected, and which is not
 
 **Not affected: the decision itself.** The `packaging` topic's rule — pin
-tags, never branches — is unchanged by anything observed here, and nothing in
-this file argues that it should change. If anything, observation 2 supports
-the companion rule more directly than the topic's own reasoning did: "never
-move a published tag" was justified by an appeal to caching (a moved tag
-might be masked by a stale cached resolution and so go unnoticed); what was
-actually observed is stronger and simpler — a moved tag is not masked at all,
-it demonstrably and immediately reaches whoever reinstalls from it. A branch
-pin remains the wrong choice for a released artifact, just not for the reason
-originally given: the risk is not "a branch pin can go silently stale," it is
-that a branch is not a stable identifier at all — anyone can push to it at
-any time, tag or no tag, cache or no cache.
+tags, never branches — is unchanged by anything observed here. This note does
+not re-argue why that rule is correct; only an RFC may make that case, and
+doing so would mean superseding the `packaging` topic, not editing this
+file.
 
 **Affected: only the stated reasoning.** The claim that "uv caches on the
 fully-resolved commit hash, so a branch pin does not pick up new commits
