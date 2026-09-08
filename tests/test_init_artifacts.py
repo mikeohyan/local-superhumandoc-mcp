@@ -57,13 +57,29 @@ def test_a_commented_out_key_counts_as_present(tmp_path: Path) -> None:
     assert env.read_text(encoding="utf-8") == before
 
 
-def test_an_append_starts_on_a_line_of_its_own(tmp_path: Path) -> None:
-    """Without this, the first appended line welds onto the last existing one
-    and produces a key nothing reads."""
-    env = tmp_path / ".env"
-    env.write_text("SHDOC_API_KEY=x", encoding="utf-8")
-    scaffold_env(tmp_path)
-    assert env.read_text(encoding="utf-8").splitlines()[0] == "SHDOC_API_KEY=x"
+def test_an_append_is_shaped_the_same_with_or_without_a_trailing_newline(
+    tmp_path: Path,
+) -> None:
+    """Comparing the two cases is what makes the newline guard testable.
+
+    Asserting only that the first line survived passes even with the guard
+    deleted, because the blank-separator branch happens to terminate the line
+    too -- proven by mutation, not assumed. What the guard actually buys is
+    that a file lacking a final newline gets the same shape as one that has
+    it, rather than silently losing the blank line before the addition.
+    """
+    with_newline, without = tmp_path / "a", tmp_path / "b"
+    with_newline.mkdir()
+    without.mkdir()
+    (with_newline / ".env").write_text("SHDOC_API_KEY=x\n", encoding="utf-8")
+    (without / ".env").write_text("SHDOC_API_KEY=x", encoding="utf-8")
+
+    scaffold_env(with_newline)
+    scaffold_env(without)
+
+    appended = (with_newline / ".env").read_text(encoding="utf-8")
+    assert appended == (without / ".env").read_text(encoding="utf-8")
+    assert appended.startswith("SHDOC_API_KEY=x\n\n")
 
 
 def test_the_footer_prose_is_never_appended(tmp_path: Path) -> None:
