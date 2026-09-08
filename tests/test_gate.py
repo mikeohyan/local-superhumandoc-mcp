@@ -93,7 +93,10 @@ async def test_no_more_than_the_global_cap_run_at_once():
     contend for the global semaphore, so a leaked global slot (the
     `finally: self._global.release()` in `for_page` gone missing) would
     wedge the losers here until `Deadline()`'s real ~80s ran out. Bounding
-    the gather turns that into a prompt failure instead."""
+    the gather turns that into a prompt failure instead.
+
+    The value 3 is recorded in `docs/reference/api-operational-constants.md`
+    §1.4, so this value must be changed in both places together."""
     gate, overlap = ExportGate(), _OverlapCounter()
 
     async def one(page):
@@ -103,7 +106,7 @@ async def test_no_more_than_the_global_cap_run_at_once():
     await asyncio.wait_for(
         asyncio.gather(*(one(f"page-{n}") for n in range(10))), timeout=5.0
     )
-    assert overlap.max_concurrent == EXPORT_CONCURRENCY_GLOBAL
+    assert overlap.max_concurrent == 3
 
 
 async def test_a_failure_inside_the_gate_still_releases_it():

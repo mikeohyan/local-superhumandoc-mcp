@@ -89,6 +89,31 @@ async def test_a_failing_status_is_refused_whatever_the_body_says(status, body):
         await _downloader(_responding(status, body)).fetch("https://s3/x", Deadline())
 
 
+@pytest.mark.parametrize(
+    "status,body",
+    [
+        (100, ""),
+        (199, "still not content"),
+        (300, ""),
+        (307, ""),
+        (399, "not content either"),
+    ],
+)
+async def test_an_informational_or_redirect_status_is_also_refused(status, body):
+    """The status check is a band with two pinned edges, not a floor: `httpx2`
+    does not follow redirects by default, so a 3xx -- an S3 region redirect,
+    say -- arrives here as a response like any other, with its own body and no
+    exception raised by the transport. A check that only rejects >= 400 (or
+    even >= 300, missing the 1xx side) would hand a redirect's or an
+    informational response's body to the model as though it were the page --
+    the exact silent-wrong-content failure this module exists to prevent.
+    Neither of these bodies is XML or an S3 error document, so only the status
+    check can be what refuses them.
+    """
+    with pytest.raises(DownloadUnusable):
+        await _downloader(_responding(status, body)).fetch("https://s3/x", Deadline())
+
+
 async def test_leading_whitespace_does_not_hide_an_error_document():
     """The check is on the first non-space characters, not on byte zero."""
     with pytest.raises(DownloadUnusable):
@@ -103,6 +128,40 @@ async def test_a_page_that_merely_mentions_xml_is_not_refused():
     assert "snippet" in await _downloader(
         _responding(200, "Here is a snippet: <?xml ... ?>")
     ).fetch("https://s3/x", Deadline())
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        (
+            "```python\n"
+            "response = client.get(url)\n"
+            'if response.text.startswith("<Error"):\n'
+            '    raise ValueError("bad response")\n'
+            "```\n"
+        ),
+        (
+            "# Handling S3 Errors\n\n"
+            "When a request fails, S3 returns a body starting with "
+            "`<Error>` followed by an error code such as AccessDenied or "
+            "NoSuchKey.\n\n"
+            "Always check the status code first before parsing the body."
+        ),
+    ],
+)
+async def test_a_page_that_mentions_the_error_tag_mid_body_is_not_refused(body):
+    """The discriminator is the *prefix*, not a substring search anywhere in
+    the body: a code sample or a documentation page discussing XML error
+    handling is exactly the realistic case where `<Error` appears well away
+    from the first non-space character while the page is still genuine
+    content, not an S3 error document. Neither fixture here starts with
+    `<Error` or `<?xml`, so a check that instead asked "does `<Error` appear
+    anywhere" would refuse both -- silently making them permanently
+    unreadable and misreporting a real page as a broken link.
+    """
+    assert await _downloader(_responding(200, body)).fetch(
+        "https://s3/x", Deadline()
+    ) == body
 
 
 async def test_an_xml_declaration_without_an_error_element_is_content():
