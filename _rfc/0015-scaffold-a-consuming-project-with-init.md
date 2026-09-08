@@ -75,31 +75,70 @@ The console script grows one subcommand. **`superhumandoc-mcp init` scaffolds
 the current directory into a working consuming project**, offline, touching no
 network and handling no credentials. It writes three things:
 
-1. **`.env`**, copied from the packaged template, with `SHDOC_API_KEY` and
-   `SHDOC_DOC_ID` present and empty, and created with mode `600`. That mode is a
-   POSIX guarantee, not a portable one: `os.chmod(0o600)` on Windows does not
-   carry POSIX permission semantics, it only clears the read-only attribute, so
-   the confidentiality this buys is real on POSIX and effectively absent on
-   Windows rather than degraded-but-present.
+1. **`.env`**, copied from the packaged template when absent, with
+   `SHDOC_API_KEY` and `SHDOC_DOC_ID` present and empty, and created with mode
+   `600`; when already present, appended with the template block for whichever
+   `SHDOC_` keys it is missing, touching no line that was already there (see
+   below). The mode is a POSIX guarantee, not a portable one: `os.chmod(0o600)`
+   on Windows does not carry POSIX permission semantics, it only clears the
+   read-only attribute, so the confidentiality this buys is real on POSIX and
+   effectively absent on Windows rather than degraded-but-present.
 2. **`.mcp.json`**, carrying exactly the stanza RFC 0006 fixes — `type: stdio`,
    `command: uvx`, and `args` naming the pinned source and the script — with no
-   `env` block and no secret.
+   `env` block and no secret, when absent; when already present, left
+   untouched, with that same stanza printed instead of written (see below).
 3. **A `.env` line appended to `.gitignore`**, creating the file if absent and
    doing nothing if the line is already there.
 
 **The command never overwrites a byte it did not write.** That principle now
-governs each artifact independently rather than gating the run as a whole.
-`.env` and `.mcp.json` are each create-only, and each is checked and written on
-its own: if `.env` already exists, `init` leaves it untouched and reports why,
-and it makes the same check for `.mcp.json` separately, in either order. A
-project that already carries a `.mcp.json` — because it registers some other
-MCP server, an ordinary case — no longer blocks its `.env` from being
-scaffolded, and a project with an `.env` left over from an earlier partial run
+governs each artifact independently rather than gating the run as a whole, and
+it turns out to permit more than a flat skip: appending new content to a file
+leaves every existing byte exactly as it was, so an append satisfies the
+principle as completely as leaving the file untouched does — the principle was
+never "refuse when the file exists," it was "never overwrite what I did not
+write." `.mcp.json` is checked and written on its own, create-only: if it
+already exists, `init` leaves it untouched. `.env` is checked and written on
+its own too, but a collision does not end the same way — see below. A project
+that already carries a `.mcp.json` — because it registers some other MCP
+server, an ordinary case — no longer blocks its `.env` from being scaffolded or
+appended to, and a project with an `.env` left over from an earlier partial run
 still gets its `.mcp.json` written. Collision on one artifact says nothing about
 the others. That per-artifact independence is also what makes `init` safe to
-re-run on a directory that is only partly scaffolded: a second run writes
-whatever is still missing and leaves what already exists untouched, rather than
-refusing outright the way a whole-run guard would.
+re-run on a directory that is only partly scaffolded: a second run writes or
+appends whatever is still missing and leaves what already exists untouched,
+rather than refusing outright the way a whole-run guard would.
+
+**When `.env` already exists, `init` appends what is missing instead of
+refusing.** A project that already has a `.env` holding other credentials, or
+one left over from an earlier partial run, is the ordinary case, not the
+exception, and a flat skip left it to work out the rest by hand. Instead `init`
+reads the existing file, and for every `SHDOC_` key the packaged template
+defines that the file does not already contain, appends that key's template
+block — value and explanatory comment together — to the end of the file.
+Nothing already present is changed, reordered, or duplicated. The presence test
+is precise, because getting it wrong duplicates keys: **a key counts as already
+present if it appears in the file as an assignment at the start of a line,
+whether or not that line is commented out** — a project that has deliberately
+commented out an optional key does not get a second copy appended. This is the
+same policy `.gitignore` already follows below, applied to a second file:
+appending a key that is absent overwrites no byte the command did not write,
+exactly as the `.gitignore` append already does. It is also safe on a `.env`
+that holds credentials for something else entirely, because the config reader
+RFC 0006 built only ever consults `SHDOC_`-prefixed keys — unrelated keys are
+inert to this server and untouched by this append.
+
+**When `.mcp.json` already exists, `init` does not modify it, but does not
+leave the user to guess either.** JSON cannot be appended to the way a
+line-oriented file can: merging means parsing and re-serialising the whole
+document, which reformats a file `init` did not create, discards whatever
+formatting the project chose, and risks damaging a configuration the user
+depends on — a real reason not to merge, not a technicality (see the "Merge the
+stanza" alternative below). So `init` leaves an existing `.mcp.json` untouched
+and instead prints the exact stanza to add — `type: stdio`, `command: uvx`, and
+the pinned `args` — stating where it goes: under the top-level `mcpServers`
+key. This is a deliberate trade: the command declines to edit a structured file
+it does not own, and pays for that by making the manual step a copy and paste
+rather than a research task.
 
 There is no promise that a run produces every artifact or leaves the directory
 exactly as it found it — pre-checking existence never delivered that anyway,
@@ -113,9 +152,11 @@ treating `.env` as a gate again — and it would leave the user knowing less
 about the directory's actual state than a full report gives them: a person
 recovering from a failure needs to know what happened to every artifact, not
 just the one that broke first. What `init` guarantees instead
-is that it reports, per artifact, what it wrote and what it skipped and why —
-`wrote .env`, `skipped .mcp.json: already exists` — so the report, not an
-atomicity guarantee, is what makes a partial run recoverable: the user can see
+is that it reports, per artifact, what it wrote, appended, or left untouched,
+and why — `wrote .env`, `appended .env: 1 key added`,
+`skipped .mcp.json: already exists` (with the stanza to add printed alongside)
+— so the report, not an atomicity guarantee, is what makes a partial run
+recoverable: the user can see
 exactly which artifact still needs attention rather than re-running blind. That
 report is printed to stdout, one line per artifact. This looks like it breaks a
 rule this codebase otherwise enforces everywhere — `__main__.py` sends even its
@@ -127,30 +168,35 @@ one but the entire output a person reading a terminal is here for. A future
 change should not fold this into stderr on the strength of the general rule;
 the rule and this command are answering different questions.
 
-Skipping every artifact because each one was already correct is success, not
-failure. `init` exits `0` whenever every artifact either was written this run
-or was already present, with the report saying so plainly — three
-`skipped: already exists` lines rather than three `wrote` lines when there was
-nothing left to do — echoing `terraform init`'s re-run guarantee from the
-Context above rather than contradicting it: finding nothing to do is the
-expected steady state of a directory `init` has already finished, not an error
-condition. `SystemExit(2)`, the same code `__main__.py` already uses for
-configuration failure, is reserved for genuine failure instead: an artifact
-that could not be written because of a permissions or I/O error. Because
-`init` attempts every artifact regardless of earlier failures, that failure
-prints to stderr and `init` exits `SystemExit(2)` if any attempted artifact
-failed, whether or not others in the same run succeeded — the exit code
-speaks for the run as a whole, distinct from the stdout report above, which
-speaks for each artifact in it.
+Finding nothing left to fix is success, not failure. `init` exits `0` whenever
+every artifact this run was created, appended to, or already complete — three
+`skipped: already exists` lines when a fully-scaffolded directory is re-run, or
+a mix of `wrote`, `appended`, and `skipped` lines on a partly-populated one —
+echoing `terraform init`'s re-run guarantee from the Context above rather than
+contradicting it: finding nothing to do is the expected steady state of a
+directory `init` has already finished, not an error condition. Appending to an
+existing `.env` and printing a stanza for an existing `.mcp.json` are both
+successful outcomes by this rule, not partial failures — nothing was left that
+`init` could still act on. `SystemExit(2)`, the same code `__main__.py`
+already uses for configuration failure, is reserved for genuine failure
+instead: an artifact that could not be written because of a permissions or I/O
+error. Because `init` attempts every artifact regardless of earlier failures,
+that failure prints to stderr and `init` exits `SystemExit(2)` if any attempted
+artifact failed, whether or not others in the same run succeeded — the exit
+code speaks for the run as a whole, distinct from the stdout report above,
+which speaks for each artifact in it.
 
-`.gitignore` gets different treatment, but by policy rather than by exception —
-appending a line destroys nothing an existing `.gitignore` holds, so there is
-nothing here for the "never overwrites" principle to protect against. `.env`
-and `.mcp.json` refuse when present; `.gitignore` is appended to. A line counts
-as already present only on an exact match against a stripped line of the file;
-a project that ignores `.env` through a broader pattern such as `.env*`, or
-through a global ignore file, gets a redundant but harmless extra line rather
-than a silently skipped append. `init` writes `.gitignore` even when the current
+`.gitignore` is appended to for the same reason `.env` now is: appending a line
+destroys nothing an existing `.gitignore` holds, so there is nothing here for
+the "never overwrites" principle to protect against. `.mcp.json` alone still
+refuses outright when present, because JSON cannot be appended to the way a
+line-oriented file can (see above). `.env` and `.gitignore` use different
+presence tests, though: a `.gitignore` line counts as already present only on
+an exact match against a stripped line of the file, while a `.env` key counts
+as present on a start-of-line assignment whether or not it is commented out
+(see above); a project that ignores `.env` through a broader pattern such as
+`.env*`, or through a global ignore file, gets a redundant but harmless extra
+line rather than a silently skipped append. `init` writes `.gitignore` even when the current
 directory is not a git repository: the ignore rule is what keeps `.env` safe on
 the day the directory becomes one, and no scaffolding tool surveyed gates any
 file on `.git` existing.
@@ -272,22 +318,27 @@ Should it ship, it changes what `init` writes into `.mcp.json`, not whether
 
 When `.mcp.json` already exists — typically because the project registers some
 other MCP server — `init` could parse it, add its own key under `mcpServers`,
-and write the merged result, instead of skipping the file and reporting why.
-This would close the one gap the per-artifact rule still leaves: a user with a
-pre-existing `.mcp.json` adds this server's stanza by hand. Rejected for this
-RFC because merging trades a read-only, zero-risk skip for a read-modify-write
-on a file `init` did not create — exactly the class of risk "never overwrites a
-byte it did not write" exists to avoid. JSON carries no comments, so a merged
-write cannot mark its own addition the way `.env.example`'s prose marks the
-lines it owns, and round-tripping through `json.load`/`json.dump` is not
-guaranteed to reproduce another tool's formatting or key order byte-for-byte,
-which turns "merge" into "rewrite" for the parts `init` did not add. The
-pressure this alternative relieves is also smaller than it looks: the
-per-artifact rule above already lets `.env` scaffold independently of
-`.mcp.json`, so the merge case
-left over is "the user still types one JSON stanza by hand," not "the server
-still cannot be configured." A future RFC can take up merge semantics
-deliberately if that manual step turns out to matter in practice.
+and write the merged result, instead of leaving the file untouched and
+printing what to add. This RFC takes half of this idea and rejects the other
+half, and the two halves are not the same risk. `.env` gets exactly this kind
+of merge now (see Decision above): appending a missing key's block is safe
+because the new bytes go after everything that already exists, nothing already
+there is re-parsed or re-emitted, and the file's existing formatting cannot be
+disturbed because it is never touched. `.mcp.json` has no equivalent free
+lunch, because the risk lives in the file format, not in caution for its own
+sake. JSON carries no comments, so a merged write cannot mark its own addition
+the way `.env.example`'s prose marks the lines it owns. And there is no way to
+add one key to a JSON document without parsing the whole thing and
+re-serialising it — which is not appending, it is a rewrite of every byte,
+including the ones `init` did not add — and round-tripping through
+`json.load`/`json.dump` is not guaranteed to reproduce another tool's
+formatting or key order byte-for-byte. That turns "merge" into "reformat a file
+the user, or another tool, formatted deliberately," exactly the class of risk
+"never overwrites a byte it did not write" exists to avoid. So `init` prints
+the stanza instead of writing it, closing most of the practical gap — the user
+copies and pastes rather than assembles the shape from documentation — without
+taking on the rewrite risk. A future RFC can take up true JSON merge semantics
+deliberately if the printed stanza turns out not to be enough in practice.
 
 ### Build a separate installer tool
 
@@ -347,14 +398,26 @@ if it changes, projects scaffolded by older versions carry the old shape, and
 they carry it in a committed file rather than a regenerable one. The mitigation
 is only that `init` writes the minimal documented form and no optional keys.
 
-**A project with a pre-existing `.mcp.json` gets no stanza written at all.**
-Per-artifact independence keeps that collision from blocking `.env`, but
-`.mcp.json` itself is still refused outright when present, and `init` does not
-merge into it (see the "Merge the stanza" alternative above). The user is left
-to open the file and hand-write the stanza `init` would otherwise have
-produced — `type: stdio`, `command: uvx`, and the pinned `args` — with no
-tooling help for the case, an ordinary one, where a project already registers
-some other MCP server.
+**A project with a pre-existing `.mcp.json` gets a printed stanza, not a
+written one.** Per-artifact independence keeps that collision from blocking
+`.env`, and `.mcp.json` itself is still refused outright when present — `init`
+does not merge into it (see the "Merge the stanza" alternative above). But the
+cost of that collision is now much smaller than a bare skip: `init` prints the
+exact stanza it would otherwise have written — `type: stdio`, `command: uvx`,
+and the pinned `args` — and states where it goes, under the top-level
+`mcpServers` key, so the user's next action is a copy and paste rather than
+hand-assembling the shape from documentation, in the ordinary case where a
+project already registers some other MCP server. The residual cost is the
+paste itself and the small risk of a slip doing it by hand.
+
+**An appended `.env` ends up less tidy than a freshly created one.** The
+template's own order groups related settings together with their explanatory
+comments; a `.env` `init` appends to instead keeps the project's pre-existing
+content first and adds this server's missing keys at the bottom, in whatever
+order the template lists them, rather than interleaved with what was already
+there. That is a cosmetic cost, not a functional one — the config reader has no
+opinion on key order — and it is the price of never touching a byte that
+predates the append.
 
 **Writing `.gitignore` touches a file this project does not own.** Appending one
 line is close to the smallest possible intrusion, and it is idempotent, but a
