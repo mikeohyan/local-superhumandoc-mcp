@@ -980,3 +980,41 @@ established (see "What this run changed" below).
   - The control and formula arms of `objects_owned_by_page`'s three-arm
     guard — this document has zero controls and zero formulas for either
     arm to find (see L2 above and "Document state read live on 2026-09-08").
+
+---
+
+# Correction — 2026-09-09: the premise behind one "untested" item was wrong
+
+The two runs above both record `force=True` against a page that genuinely owns
+a table as untested, and both give the same reason: *"the v1 API this project
+targets cannot recreate a table, so the loss would be permanent."*
+
+**That reason is false.** A probe on 2026-09-09 created a page whose HTML
+content contained a `<table>`, and a real table object appeared in
+`listTables` within ten seconds, owned by that page. The full measurement is
+in `docs/reference/api-operational-constants.md`, §3.3.
+
+The claim was already contradicted by evidence inside this very document. The
+"Document state read live on 2026-09-08" section lists `Table 1`, `Table 2`
+and `Table 3`; those are owned by the `TORTURE-MD`, `TORTURE-HTML` and
+`TORTURE-GEN2` pages, which the 2026-09-03 fidelity runs created through this
+same API. Tables had been created by page-content writes three times before
+anyone wrote down that it could not be done. The claim appears to have been
+inferred from the absence of a `createTable` endpoint in the inventory, and
+never checked against the document it was written about.
+
+**What this changes.** The blocker was never the writing, it was the cleanup —
+and the cleanup problem is real. v1.6.0 has no endpoint that deletes a table,
+and deleting the owning page orphans the table rather than removing it (its
+`parent` becomes `null`). So a run *can* now build its own page-owning-a-table
+and force a destructive write over it; it just cannot tidy up afterwards
+without someone opening the UI.
+
+The two remaining gaps are unaffected by this correction. `push_button` still
+has no button whose action is known, and the control and formula arms of
+`objects_owned_by_page` still have nothing to find: `listControls` and
+`listFormulas` both returned empty again on 2026-09-09.
+
+**Litter left by the probe.** `grid-gL5OlKQPxM` ("Table 4") is an orphan in
+`6vqpBu-VYd` with a null parent. Its page was deleted; the table could not be.
+It is harmless — no test reads it — but only the UI can remove it.

@@ -1153,6 +1153,50 @@ adopted, on the grounds that inventing the tool from a budget decision would be
 deciding the surface from the wrong end. If a bulk read is ever wanted, it is a
 `tool-surface` question first.
 
+## 3.3 Tables can be created, but never deleted, through the API
+
+Measured 2026-09-09 against scratch doc `6vqpBu-VYd` [SPEC-VERIFIED].
+
+1. **A `<table>` in page content creates a real table object.** Creating a page
+   whose `canvasContent` HTML contains a `<table>` produces an actual table in
+   the doc's `listTables` output, owned by the new page — not static markup.
+   One `createPage` carrying a two-row HTML table yielded `grid-gL5OlKQPxM`
+   ("Table 4"), with `parent` pointing at the page that had just been created.
+   The table appeared in `listTables` within 10 seconds of the mutation
+   reporting `applied`.
+
+   Markdown does the same: `Table 1` through `Table 3` in that document are
+   owned by the `TORTURE-MD`, `TORTURE-HTML` and `TORTURE-GEN2` pages written
+   by the 2026-09-03 fidelity runs, one of which sent markdown. The two
+   formats differ in what they *preserve* — a markdown pipe table loses its
+   header row (§3.2, item 2) — not in whether a table object is created.
+
+2. **Nothing in v1.6.0 deletes a table.** The endpoint inventory (§6) carries
+   no `DELETE /docs/{docId}/tables/{tableIdOrName}`. Rows can be deleted;
+   the table itself cannot. Removing one requires the web UI.
+
+3. **Deleting the owning page orphans the table rather than destroying it.**
+   After `deletePage` on the page above, the page was gone from `listPages`
+   immediately, while `grid-gL5OlKQPxM` remained in `listTables` for the full
+   135 seconds it was watched — well past the 16-23 s snapshot lag measured in
+   `docs/validation/2026-09-03-api-operational-probes.md` (P8). Its `parent`
+   had become `null`.
+
+**What follows for the ownership guard.** `objects_owned_by_page` in
+`superhumandoc_mcp.tools.guard` reads `obj.get("parent") or {}`, so an orphan
+with a null parent matches no page and is correctly reported as owned by
+nothing. The `or {}` is load-bearing: a plain `obj["parent"].get("id")` would
+raise on every orphan in the document.
+
+**What follows for validation runs.** A run that needs a page owning a real
+table can now build one for itself, which
+`docs/validation/2026-09-08-live-tool-surface.md` had recorded as impossible.
+The cost is not zero: every such table is permanent litter until someone
+removes it in the UI, and a run that deletes its page leaves the table behind
+rather than cleaning up after itself.
+
+---
+
 ---
 
 # 4. Client survey
