@@ -1182,18 +1182,26 @@ Measured 2026-09-09 against scratch doc `6vqpBu-VYd` [SPEC-VERIFIED].
    `docs/validation/2026-09-03-api-operational-probes.md` (P8). Its `parent`
    had become `null`.
 
+4. **A forced overwrite of the owning page destroys the table outright.**
+   This is the asymmetry, measured the same day: `deletePage` orphans the
+   table, but `updatePage` with `insertionMode: replace` and no `elementId` —
+   what `overwrite_page(force=True)` sends — removes it from `listTables`
+   entirely, within 8 seconds. Destroying the page keeps the table; replacing
+   the page's content destroys it.
+
 **What follows for the ownership guard.** `objects_owned_by_page` in
 `superhumandoc_mcp.tools.guard` reads `obj.get("parent") or {}`, so an orphan
 with a null parent matches no page and is correctly reported as owned by
 nothing. The `or {}` is load-bearing: a plain `obj["parent"].get("id")` would
 raise on every orphan in the document.
 
-**What follows for validation runs.** A run that needs a page owning a real
-table can now build one for itself, which
-`docs/validation/2026-09-08-live-tool-surface.md` had recorded as impossible.
-The cost is not zero: every such table is permanent litter until someone
-removes it in the UI, and a run that deletes its page leaves the table behind
-rather than cleaning up after itself.
+**What follows for the ownership guard's own tests.** A run that needs a page
+owning a real table can now build one for itself, which
+`docs/validation/2026-09-08-live-tool-surface.md` had recorded as impossible,
+and can dispose of it cleanly by forcing an overwrite rather than deleting the
+page. Only the delete path leaves litter, and litter is unrecoverable: with no
+delete-table endpoint, an orphan can never be removed by any sequence of API
+calls, because no page owns it for a forced overwrite to destroy.
 
 ---
 

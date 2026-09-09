@@ -1018,3 +1018,72 @@ has no button whose action is known, and the control and formula arms of
 **Litter left by the probe.** `grid-gL5OlKQPxM` ("Table 4") is an orphan in
 `6vqpBu-VYd` with a null parent. Its page was deleted; the table could not be.
 It is harmless — no test reads it — but only the UI can remove it.
+
+---
+
+# L5 and L6 — 2026-09-09: two of the three gaps closed
+
+Run against `6vqpBu-VYd`, same rules as the runs above: the doc id is asserted
+before any other call, the token is never printed, and no pre-existing object
+is written to except where stated.
+
+## L5. Does `push_button` work, and what does the button actually do?
+
+**The blast radius was readable all along.** Every run above skipped
+`push_button` because `test-table-02`'s button "has an action nobody has
+recorded" and "a blast radius that cannot be stated in advance". It is
+returned by `listColumns`, in the column's own `format`:
+
+```
+c-Lapt2e6qA9  name "button"  calculated: true
+  format: {label: "Increment Count",
+           action: "ModifyRows(thisRow, count, count+1)",
+           type: "button", isArray: false}
+```
+
+The action writes one number cell on its own row. That is a blast radius of a
+single cell, statable in advance by one read call that nobody made. The
+caution was reasonable but the premise — that the action was unknowable —
+was not checked.
+
+**Result: PASS.** `push_button(grid-EETnwpzofr, i-_0US3LVT0m, c-Lapt2e6qA9)`
+returned `{'outcome': 'applied', 'detail': 'applied', 'warning': None}`, and
+`count` on that row moved `0 -> 1`, visible 8 seconds later. Exactly one
+increment; no other cell changed. `push_button` is no longer mock-only.
+
+## L6. Does `force=True` bypass the guard on a page that really owns a table?
+
+Built its own fixture rather than touching anything pre-existing, which §3.3
+of `docs/reference/api-operational-constants.md` establishes is possible.
+
+1. `create_page` with a `<table>` in its HTML → `canvas-sZBc4nHK_N`,
+   `outcome: applied`.
+2. `objects_owned_by_page` → `{'tables': ['grid-UMvMvdBdNV'], 'controls': [],
+   'formulas': []}`. The guard sees the table the page owns.
+3. `overwrite_page(force=False)` → **refused**, as designed:
+
+   > `ContentRefused: Page 'canvas-sZBc4nHK_N' owns objects this write cannot
+   > see and would destroy: tables grid-UMvMvdBdNV. ... Pass force=True to
+   > proceed anyway.`
+
+4. `overwrite_page(force=True)` → `outcome: applied`. 8 seconds later the page
+   held a single `line` element, `objects_owned_by_page` reported no tables,
+   and `grid-UMvMvdBdNV` was gone from `listTables` altogether.
+
+**Result: PASS.** The guard refuses without `force` and yields to it, and the
+destruction it warns about is real rather than theoretical — the table is
+destroyed, not orphaned. Fixture page deleted afterward; the doc is back to 10
+pages.
+
+## What remains
+
+One gap, unchanged and still needing the web UI: **the control and formula
+arms of `objects_owned_by_page`**. `listControls` and `listFormulas` are still
+empty, so two of the guard's three arms have never matched a real object. No
+API endpoint creates either, so this cannot be closed from code. Creating one
+control and one named formula on a page that no test destroys would close it
+permanently — the guard test only needs them to exist and be detected, never
+to be consumed.
+
+The orphan `grid-gL5OlKQPxM` ("Table 4") from the earlier probe is still
+there and still removable only in the UI.
