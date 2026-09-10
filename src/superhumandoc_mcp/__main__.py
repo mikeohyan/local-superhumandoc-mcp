@@ -6,7 +6,9 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import NoReturn
 
+from superhumandoc_mcp import running_version
 from superhumandoc_mcp.client import DocsClient, TokenIdentity
 from superhumandoc_mcp.config import (
     Config, ConfigError, format_startup_line, load_config,
@@ -43,6 +45,18 @@ def _configure_logging(config: Config) -> None:
     logger.propagate = False
 
 
+def _refuse_to_start(error: Exception) -> NoReturn:
+    """Stop before serving, saying why and which build said so.
+
+    These are the startups people file bug reports about, so the line leads
+    with the same `version=` field the successful startup line does: one
+    pattern finds the running build whether the server started or not.
+    stderr, not stdout: stdout is the MCP transport.
+    """
+    print(f"superhumandoc-mcp: version={running_version()} {error}", file=sys.stderr)
+    raise SystemExit(2) from error
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="superhumandoc-mcp")
     parser.add_argument("--env-file", dest="env_file", default=None)
@@ -65,9 +79,7 @@ def main() -> None:
     try:
         config = load_config(args.env_file, os.environ, Path.cwd())
     except ConfigError as error:
-        # stderr, not stdout: stdout is the MCP transport.
-        print(f"superhumandoc-mcp: {error}", file=sys.stderr)
-        raise SystemExit(2) from error
+        _refuse_to_start(error)
 
     _configure_logging(config)
 
@@ -92,8 +104,7 @@ async def _identify(
         return await client.whoami()
     except AuthFailure as error:
         if error.status == 401:
-            print(f"superhumandoc-mcp: {error}", file=sys.stderr)
-            raise SystemExit(2) from error
+            _refuse_to_start(error)
         return None
     except ClientError:
         return None

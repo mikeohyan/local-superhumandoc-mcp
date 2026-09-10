@@ -166,3 +166,26 @@ def test_the_startup_line_still_never_carries_the_token() -> None:
         _config(), TokenIdentity(name="MCP Validator", scoped=True)
     )
     assert "synthetic-token-not-real" not in line
+
+
+async def test_a_401_at_startup_names_the_running_version(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A refused startup is exactly the one a bug report is about, so it
+    carries the same leading `version=` field the startup line does. The fake
+    version proves the field is derived; the lookup raises for any
+    distribution name but this one."""
+    import superhumandoc_mcp
+
+    monkeypatch.setattr(
+        superhumandoc_mcp, "version", lambda name: {"superhumandoc-mcp": "4.5.6"}[name]
+    )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(401)
+
+    with pytest.raises(SystemExit):
+        await _identify(_config(), _client(handler))
+    line = capsys.readouterr().err.strip()
+    assert line.startswith("superhumandoc-mcp: version=4.5.6 ")
+    assert len(line) > len("superhumandoc-mcp: version=4.5.6 ")
