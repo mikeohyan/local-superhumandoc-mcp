@@ -28,7 +28,7 @@ credentials beyond your own Superhuman Docs API token.
 Run this once in the project directory:
 
 ```bash
-uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.0 \
+uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.1 \
   superhumandoc-mcp init
 ```
 
@@ -59,7 +59,7 @@ The registration `init` writes:
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.0",
+        "git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.1",
         "superhumandoc-mcp"
       ]
     }
@@ -93,7 +93,7 @@ an edit. To move to a newer release, run that release's `init` in the project
 directory:
 
 ```bash
-uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.0 \
+uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.1 \
   superhumandoc-mcp init
 ```
 
@@ -102,7 +102,8 @@ uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.0 \
 reports the release that pins and prints the one argument to change;
 otherwise it prints the whole entry to put in its place. Make the change and
 restart `claude`. The server's startup line on stderr leads with `version=`,
-which confirms the release actually running.
+which confirms the release actually running — as does the line it prints
+if it refuses to start.
 
 What changed in each release is on the
 [releases page](https://github.com/mikeohyan/local-superhumandoc-mcp/releases).
