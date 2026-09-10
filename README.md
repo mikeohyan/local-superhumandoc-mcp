@@ -16,32 +16,12 @@ implemented and tested. A client that connects finds twelve always-on tools:
 `clear_page_content`, `overwrite_page`, `delete_element`, `delete_rows`,
 `push_button` — register only when `SHDOC_ALLOW_DESTRUCTIVE` is enabled.
 
-## Setup
+## Requirements
 
-```bash
-cp .env.example .env    # then fill in your token and document ID
-```
-
-`.env` is gitignored and must never be committed. The API token is a bearer
-token in UUID form; see the `upstream-api` topic in
-[`_rfc/README.md`](_rfc/README.md) for the authentication scheme, the pinned API
-version, and why the published rate limits are treated as advisory.
-
-Then, to work on the server itself:
-
-```bash
-uv sync                                   # including the dev group
-uv run pytest                             # the test suite
-uv run superhumandoc-mcp --env-file "$PWD/.env"
-```
-
-The last command serves MCP over stdio, so it will sit waiting on a client
-rather than printing and exiting. It logs the `.env` path it resolved to stderr
-at startup, which is the quickest check that configuration resolved the way you
-expected.
-
-That covers working on the server in this repository. Installing it into a
-project that *uses* it is below.
+[`uv`](https://docs.astral.sh/uv/) is the only thing you need installed. It
+fetches its own Python — this project needs 3.11 or newer — and handles
+everything else. Nothing below assumes a checkout of this repository or any
+credentials beyond your own Superhuman Docs API token.
 
 ## Installing in a project
 
@@ -125,6 +105,35 @@ would otherwise be identical for every clone and every machine.
 
 The server logs the `.env` path it resolved to stderr at startup. That line is
 how you confirm which file was actually loaded.
+
+## Working on the server itself
+
+Everything above is about *using* the server. To change it:
+
+```bash
+git clone https://github.com/mikeohyan/local-superhumandoc-mcp
+cd local-superhumandoc-mcp
+cp .env.example .env                      # then fill in your token and document ID
+uv sync                                   # including the dev group
+uv run pytest                             # the test suite
+uv run superhumandoc-mcp --env-file "$PWD/.env"
+```
+
+`.env` is gitignored and must never be committed. The API token is a bearer
+token in UUID form; see the `upstream-api` topic in
+[`_rfc/README.md`](_rfc/README.md) for the authentication scheme, the pinned API
+version, and why the published rate limits are treated as advisory.
+
+The last command serves MCP over stdio, so it will sit waiting on a client
+rather than printing and exiting. The startup line described above is how you
+check it resolved the `.env` you meant.
+
+Changes arrive by fork and pull request; nobody but the owner can push here.
+`main` refuses force-pushes and deletion, and a published `v*` tag can never be
+moved or deleted — those tags are pins inside other people's `.mcp.json` files,
+so moving one would silently change what their server runs. The immutability
+rule itself belongs to the `packaging` topic; the repository now enforces it
+rather than relying on discipline.
 
 ## Design decisions
 
