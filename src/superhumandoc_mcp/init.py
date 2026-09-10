@@ -34,6 +34,11 @@ _ASSIGNMENT = re.compile(
     r"^[ \t]*(?:#[ \t]*)?(?:export[ \t]+)?(SHDOC_[A-Z0-9_]+)[ \t]*="
 )
 
+# The ref in a `git+<this repository>@<ref>` argument. Anchored to this
+# server's own repository, so a registration that points this key at a fork,
+# or at some other git-hosted server, is never read as a pin of this one.
+_PIN = re.compile(re.escape(f"git+{_REPO}@") + r"(\S+)\Z")
+
 
 class InitError(Exception):
     """Scaffolding could not proceed. The message is shown to the user."""
@@ -205,27 +210,101 @@ def entry_fragment() -> str:
     return "\n".join(line[2:] for line in body)
 
 
+def existing_pin(text: str) -> str | None:
+    """The ref an existing `.mcp.json` pins this server to, or None.
+
+    None means "could not tell", never "not pinned": malformed JSON, a document
+    that is not an object, no `mcpServers` object, no object under this
+    server's key, no `args` list, or no argument naming this repository all
+    come back as None, and the caller then offers the full stanza exactly as it
+    did before the pin was read at all. Reading is the whole of it -- nothing
+    here writes, which is what keeps the `project-setup` topic's create-only
+    rule for `.mcp.json` intact.
+    """
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    servers = document.get("mcpServers") if isinstance(document, dict) else None
+    entry = servers.get(_SERVER_KEY) if isinstance(servers, dict) else None
+    args = entry.get("args") if isinstance(entry, dict) else None
+    if not isinstance(args, list):
+        return None
+    for arg in args:
+        if isinstance(arg, str) and (match := _PIN.match(arg)):
+            return match.group(1)
+    return None
+
+
+def _indented_fragment() -> str:
+    """`entry_fragment`, indented to sit under a report line."""
+    return "\n".join(f"  {line}" for line in entry_fragment().splitlines())
+
+
 def scaffold_mcp_json(cwd: Path) -> Outcome:
-    """Create `.mcp.json`, or print what to add to the one already there.
+    """Create `.mcp.json`, or say what to change in the one already there.
 
     JSON cannot be appended to: adding a key means parsing and re-serialising
     the whole document, which rewrites bytes this command did not write and
     discards whatever formatting the project chose. So an existing file is left
-    exactly as it is -- and the stanza is printed instead, making the remaining
-    step a copy and paste rather than a research task.
+    exactly as it is, and is never written to here.
+
+    What is printed instead depends on what that file already says. If it
+    registers this server at the version doing the scaffolding, there is
+    nothing to do. If it registers it at another ref, the report names both and
+    the one string to change -- which is the whole of an upgrade. Anything
+    else, including a file this command cannot read or parse, gets the full
+    stanza, as it did before the existing pin was read at all.
     """
     entry = server_entry()
     path = cwd / ".mcp.json"
     if path.exists():
-        stanza = (
-            '  add this under the top-level "mcpServers" key:\n\n'
-            + "\n".join(f"  {line}" for line in entry_fragment().splitlines())
-        )
-        return Outcome(".mcp.json", "skipped", "already exists", stanza)
+        return _existing_registration(path)
     path.write_text(
         json.dumps({"mcpServers": entry}, indent=2) + "\n", encoding="utf-8"
     )
     return Outcome(".mcp.json", "wrote")
+
+
+def _existing_registration(path: Path) -> Outcome:
+    """Report on an existing `.mcp.json` without writing to it.
+
+    Nothing here may fail the artifact. A file that cannot be read or decoded
+    was still left untouched, which is a skip; turning it into `failed` would
+    report an error in a directory where nothing went wrong. `OSError` covers a
+    directory at this path, which was a skip before the file was ever read.
+
+    The wording for a differing pin is deliberately neutral about direction:
+    an older build's `init` run in a newer project would otherwise tell the
+    user to "upgrade" backwards.
+    """
+    current = f"v{version('superhumandoc-mcp')}"
+    try:
+        pinned = existing_pin(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        pinned = None
+    if pinned == current:
+        return Outcome(
+            ".mcp.json", "skipped", f"already registers {_SERVER_KEY} at {current}"
+        )
+    if pinned is not None:
+        stanza = (
+            f"  this build is {current}; to run it instead, change that "
+            "argument to:\n\n"
+            f'      "git+{_REPO}@{current}"\n\n'
+            "  or replace the whole entry with:\n\n" + _indented_fragment()
+        )
+        return Outcome(
+            ".mcp.json",
+            "skipped",
+            f"already registers {_SERVER_KEY}, pinned to @{pinned}",
+            stanza,
+        )
+    stanza = (
+        '  add this under the top-level "mcpServers" key:\n\n'
+        + _indented_fragment()
+    )
+    return Outcome(".mcp.json", "skipped", "already exists", stanza)
 
 
 def scaffold_gitignore(cwd: Path) -> Outcome:

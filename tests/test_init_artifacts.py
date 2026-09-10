@@ -22,6 +22,31 @@ from superhumandoc_mcp.init import (
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
 
+_REPO_URL = "https://github.com/mikeohyan/local-superhumandoc-mcp"
+
+
+def _current() -> str:
+    from importlib.metadata import version
+
+    return f"v{version('superhumandoc-mcp')}"
+
+
+def _registration(
+    ref: str, *, key: str = "superhumandoc", repo: str = _REPO_URL
+) -> str:
+    return json.dumps(
+        {
+            "mcpServers": {
+                key: {
+                    "type": "stdio",
+                    "command": "uvx",
+                    "args": ["--from", f"git+{repo}@{ref}", "superhumandoc-mcp"],
+                }
+            }
+        },
+        indent=2,
+    ) + "\n"
+
 
 def test_creates_env_from_the_template(tmp_path: Path) -> None:
     outcome = scaffold_env(tmp_path)
@@ -189,11 +214,11 @@ def test_re_running_a_finished_directory_is_success(tmp_path: Path) -> None:
     out2, err2 = io.StringIO(), io.StringIO()
     assert run_init(tmp_path, out2, err2) == 0
     assert "skipped .env: already exists" in out2.getvalue()
-    assert "skipped .mcp.json: already exists" in out2.getvalue()
+    assert (
+        f"skipped .mcp.json: already registers superhumandoc at {_current()}"
+        in out2.getvalue()
+    )
     assert "skipped .gitignore: already ignores .env" in out2.getvalue()
-    # The printed stanza is the entire mitigation for the .mcp.json collision.
-    # Without this it can be deleted from run_init with the suite still green.
-    assert '"superhumandoc": {' in out2.getvalue()
 
 
 def test_one_artifact_failing_does_not_stop_the_others(tmp_path: Path) -> None:
@@ -299,3 +324,112 @@ def test_an_exported_key_is_not_shadowed_by_an_appended_blank(
     resolved = dict(dotenv_values(env))
     assert resolved["SHDOC_API_KEY"] == "tok_fake_for_test"
     assert resolved["SHDOC_DOC_ID"] == "doc-123"
+
+
+def test_run_init_prints_the_stanza_it_is_offering(tmp_path: Path) -> None:
+    """The printed stanza is the entire mitigation for the .mcp.json collision.
+    Without this it can be deleted from run_init with the suite still green."""
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    out, err = io.StringIO(), io.StringIO()
+    assert run_init(tmp_path, out, err) == 0
+    assert '"superhumandoc": {' in out.getvalue()
+
+
+def test_a_registration_at_this_version_needs_nothing(tmp_path: Path) -> None:
+    """The steady state after an upgrade: nothing to paste, so nothing offered."""
+    path = tmp_path / ".mcp.json"
+    before = _registration(_current())
+    path.write_text(before, encoding="utf-8")
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == (
+        f"skipped .mcp.json: already registers superhumandoc at {_current()}"
+    )
+    assert outcome.stanza == ""
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_another_pin_is_named_with_the_one_string_to_change(tmp_path: Path) -> None:
+    """This is the upgrade path: what the project runs, what this build is,
+    and the exact argument that moves one to the other -- with the file itself
+    left byte-for-byte as it was."""
+    path = tmp_path / ".mcp.json"
+    before = _registration("v0.0.1")
+    path.write_text(before, encoding="utf-8")
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == (
+        "skipped .mcp.json: already registers superhumandoc, pinned to @v0.0.1"
+    )
+    assert f"this build is {_current()}" in outcome.stanza
+    assert f'"git+{_REPO_URL}@{_current()}"' in outcome.stanza
+    assert '"superhumandoc": {' in outcome.stanza
+    assert not outcome.failed
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_newer_pin_is_not_called_an_upgrade(tmp_path: Path) -> None:
+    """An older build's `init` run in a newer project must not tell the user
+    to upgrade backwards. The wording has to hold in both directions."""
+    (tmp_path / ".mcp.json").write_text(_registration("v999.0.0"), encoding="utf-8")
+    outcome = scaffold_mcp_json(tmp_path)
+    assert "pinned to @v999.0.0" in outcome.line
+    assert "upgrade" not in (outcome.line + outcome.stanza).lower()
+
+
+def test_a_branch_pin_gets_the_same_diagnosis(tmp_path: Path) -> None:
+    (tmp_path / ".mcp.json").write_text(_registration("main"), encoding="utf-8")
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == (
+        "skipped .mcp.json: already registers superhumandoc, pinned to @main"
+    )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{not json",
+        "[]",
+        '{"mcpServers": []}',
+        '{"mcpServers": {"superhumandoc": []}}',
+        '{"mcpServers": {"superhumandoc": {"args": "not a list"}}}',
+        _registration("v1.2.3", key="shdoc"),
+        _registration("v1.2.3", repo="https://github.com/someone/fork"),
+    ],
+    ids=[
+        "malformed",
+        "not-an-object",
+        "servers-not-an-object",
+        "entry-not-an-object",
+        "args-not-a-list",
+        "registered-under-another-key",
+        "pinned-to-a-fork",
+    ],
+)
+def test_anything_unrecognised_falls_back_to_the_full_stanza(
+    tmp_path: Path, content: str
+) -> None:
+    """"Could not tell" is never reported as a pin, and never as a failure.
+    A fork registered under this key is someone else's code; reading its tag
+    as ours would print advice about the wrong repository."""
+    path = tmp_path / ".mcp.json"
+    path.write_text(content, encoding="utf-8")
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == "skipped .mcp.json: already exists"
+    assert '"superhumandoc": {' in outcome.stanza
+    assert path.read_text(encoding="utf-8") == content
+
+
+def test_an_undecodable_mcp_json_is_skipped_not_failed(tmp_path: Path) -> None:
+    """A registration saved in a legacy encoding was still left untouched.
+    `UnicodeDecodeError` is a `ValueError`; letting it reach `_attempt` would
+    report a failure in a directory where nothing went wrong."""
+    (tmp_path / ".mcp.json").write_bytes(b'{"caf\xe9": 1}')
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == "skipped .mcp.json: already exists"
+
+
+def test_a_directory_named_mcp_json_is_still_a_skip(tmp_path: Path) -> None:
+    """Parity with the behaviour before the file was ever read: an existing
+    path was a skip whatever it was, and reading it must not change that."""
+    (tmp_path / ".mcp.json").mkdir()
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == "skipped .mcp.json: already exists"
