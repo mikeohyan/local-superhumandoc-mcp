@@ -28,7 +28,7 @@ credentials beyond your own Superhuman Docs API token.
 Run this once in the project directory:
 
 ```bash
-uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.2.0 \
+uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.0 \
   superhumandoc-mcp init
 ```
 
@@ -43,7 +43,10 @@ project holds other credentials, or because an earlier run stopped halfway —
 keeps every byte it has and gains only the `SHDOC_` keys it was missing,
 appended at the end with their explanatory comments. An existing `.mcp.json` is
 left exactly as it is, because adding a key to a JSON document means rewriting
-all of it; `init` prints the stanza to paste under `mcpServers` instead. So it
+all of it. `init` reads it instead: if it already registers this server,
+`init` reports which release it pins and, when that differs from the one you
+ran, the one argument to change; otherwise it prints the stanza to paste under
+`mcpServers`. So it
 is safe to re-run: a directory that is already set up reports three skips and
 exits 0.
 
@@ -57,7 +60,7 @@ The registration `init` writes:
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.2.0",
+        "git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.0",
         "superhumandoc-mcp"
       ]
     }
@@ -83,6 +86,28 @@ project's server access to every other project's documents. Give it write
 access rather than read-only — reading a page as markdown begins with a `POST`
 to start an export, so a read-restricted token fails with a 403 that appears to
 contradict its own name.
+
+### Upgrading
+
+A project runs the release its `.mcp.json` pins, and nothing changes that but
+an edit. To move to a newer release, run that release's `init` in the project
+directory:
+
+```bash
+uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.0 \
+  superhumandoc-mcp init
+```
+
+`.env` keeps every value it has and gains any keys the new release introduced.
+`.mcp.json` is never rewritten: `init` reports the release it currently pins
+and prints the one argument to change. Change it and restart `claude`. The
+server's startup line on stderr leads with `version=`, which confirms the
+release actually running.
+
+What changed in each release is on the
+[releases page](https://github.com/mikeohyan/local-superhumandoc-mcp/releases).
+Published tags never move, so pinning an earlier release again always runs
+exactly what it ran before.
 
 ### Launch `claude` from the project root
 

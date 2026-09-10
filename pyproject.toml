@@ -1,6 +1,6 @@
 [project]
 name = "superhumandoc-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP server for a single Superhuman Docs document."
 requires-python = ">=3.11"
 dependencies = [
