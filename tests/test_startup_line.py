@@ -1,6 +1,5 @@
-from pathlib import Path
-
 from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 
 import pytest
 

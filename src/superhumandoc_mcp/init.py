@@ -34,10 +34,12 @@ _ASSIGNMENT = re.compile(
     r"^[ \t]*(?:#[ \t]*)?(?:export[ \t]+)?(SHDOC_[A-Z0-9_]+)[ \t]*="
 )
 
-# The ref in a `git+<this repository>@<ref>` argument. Anchored to this
-# server's own repository, so a registration that points this key at a fork,
-# or at some other git-hosted server, is never read as a pin of this one.
-_PIN = re.compile(re.escape(f"git+{_REPO}@") + r"(\S+)\Z")
+# The ref in a `git+<this repository>@<ref>` argument, with or without a
+# `.git` suffix on the repository -- uv treats the two as the same repository,
+# and a hand-written registration is as likely to carry it as not. Anchored to
+# this server's own repository, so a registration that points this key at a
+# fork, or at some other git-hosted server, is never read as a pin of this one.
+_PIN = re.compile(re.escape(f"git+{_REPO}") + r"(?:\.git)?@(\S+)\Z")
 
 
 class InitError(Exception):
@@ -277,6 +279,11 @@ def _existing_registration(path: Path) -> Outcome:
     The wording for a differing pin is deliberately neutral about direction:
     an older build's `init` run in a newer project would otherwise tell the
     user to "upgrade" backwards.
+
+    The fallback says to replace an existing entry as well as to add one. A
+    registration this command could not read may still carry this server's
+    key -- under a URL form it does not recognise, say -- and pasting a second
+    entry beside it would leave the document with a duplicate key.
     """
     current = f"v{version('superhumandoc-mcp')}"
     try:
@@ -289,8 +296,8 @@ def _existing_registration(path: Path) -> Outcome:
         )
     if pinned is not None:
         stanza = (
-            f"  this build is {current}; to run it instead, change that "
-            "argument to:\n\n"
+            f"  this build is {current}; to run it instead, change the "
+            f"argument ending @{pinned} to:\n\n"
             f'      "git+{_REPO}@{current}"\n\n'
             "  or replace the whole entry with:\n\n" + _indented_fragment()
         )
@@ -301,7 +308,8 @@ def _existing_registration(path: Path) -> Outcome:
             stanza,
         )
     stanza = (
-        '  add this under the top-level "mcpServers" key:\n\n'
+        '  add this under the top-level "mcpServers" key, replacing any '
+        f'existing "{_SERVER_KEY}" entry:\n\n'
         + _indented_fragment()
     )
     return Outcome(".mcp.json", "skipped", "already exists", stanza)

@@ -43,12 +43,11 @@ project holds other credentials, or because an earlier run stopped halfway —
 keeps every byte it has and gains only the `SHDOC_` keys it was missing,
 appended at the end with their explanatory comments. An existing `.mcp.json` is
 left exactly as it is, because adding a key to a JSON document means rewriting
-all of it. `init` reads it instead: if it already registers this server,
-`init` reports which release it pins and, when that differs from the one you
-ran, the one argument to change; otherwise it prints the stanza to paste under
-`mcpServers`. So it
-is safe to re-run: a directory that is already set up reports three skips and
-exits 0.
+all of it. `init` reads it instead: when it recognises this server's
+registration, it reports which release that pins and, when that differs from
+the one you ran, the one argument to change; otherwise it prints the entry to
+paste under `mcpServers`, in place of any existing one. So it is safe to
+re-run: a directory that is already set up reports three skips and exits 0.
 
 The registration `init` writes:
 
@@ -99,10 +98,11 @@ uvx --from git+https://github.com/mikeohyan/local-superhumandoc-mcp@v0.3.0 \
 ```
 
 `.env` keeps every value it has and gains any keys the new release introduced.
-`.mcp.json` is never rewritten: `init` reports the release it currently pins
-and prints the one argument to change. Change it and restart `claude`. The
-server's startup line on stderr leads with `version=`, which confirms the
-release actually running.
+`.mcp.json` is never rewritten: when `init` recognises the registration it
+reports the release that pins and prints the one argument to change;
+otherwise it prints the whole entry to put in its place. Make the change and
+restart `claude`. The server's startup line on stderr leads with `version=`,
+which confirms the release actually running.
 
 What changed in each release is on the
 [releases page](https://github.com/mikeohyan/local-superhumandoc-mcp/releases).

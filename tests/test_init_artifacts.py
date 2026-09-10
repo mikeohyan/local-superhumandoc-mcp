@@ -360,6 +360,7 @@ def test_another_pin_is_named_with_the_one_string_to_change(tmp_path: Path) -> N
         "skipped .mcp.json: already registers superhumandoc, pinned to @v0.0.1"
     )
     assert f"this build is {_current()}" in outcome.stanza
+    assert "argument ending @v0.0.1" in outcome.stanza
     assert f'"git+{_REPO_URL}@{_current()}"' in outcome.stanza
     assert '"superhumandoc": {' in outcome.stanza
     assert not outcome.failed
@@ -383,6 +384,19 @@ def test_a_branch_pin_gets_the_same_diagnosis(tmp_path: Path) -> None:
     )
 
 
+def test_a_dot_git_url_is_read_as_the_same_repository(tmp_path: Path) -> None:
+    """uv accepts the repository URL with or without `.git`, so a registration
+    written either way is this server's. Missing the `.git` form sent such a
+    project to the fallback, which told it to add an entry it already had."""
+    (tmp_path / ".mcp.json").write_text(
+        _registration("v0.0.1", repo=_REPO_URL + ".git"), encoding="utf-8"
+    )
+    outcome = scaffold_mcp_json(tmp_path)
+    assert outcome.line == (
+        "skipped .mcp.json: already registers superhumandoc, pinned to @v0.0.1"
+    )
+
+
 @pytest.mark.parametrize(
     "content",
     [
@@ -393,6 +407,7 @@ def test_a_branch_pin_gets_the_same_diagnosis(tmp_path: Path) -> None:
         '{"mcpServers": {"superhumandoc": {"args": "not a list"}}}',
         _registration("v1.2.3", key="shdoc"),
         _registration("v1.2.3", repo="https://github.com/someone/fork"),
+        _registration("v1.2.3", repo=_REPO_URL + "-fork"),
     ],
     ids=[
         "malformed",
@@ -402,6 +417,7 @@ def test_a_branch_pin_gets_the_same_diagnosis(tmp_path: Path) -> None:
         "args-not-a-list",
         "registered-under-another-key",
         "pinned-to-a-fork",
+        "pinned-to-a-lookalike",
     ],
 )
 def test_anything_unrecognised_falls_back_to_the_full_stanza(
@@ -415,6 +431,7 @@ def test_anything_unrecognised_falls_back_to_the_full_stanza(
     outcome = scaffold_mcp_json(tmp_path)
     assert outcome.line == "skipped .mcp.json: already exists"
     assert '"superhumandoc": {' in outcome.stanza
+    assert 'replacing any existing "superhumandoc" entry' in outcome.stanza
     assert path.read_text(encoding="utf-8") == content
 
 
