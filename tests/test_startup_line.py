@@ -1,5 +1,11 @@
 from pathlib import Path
 
+from importlib.metadata import PackageNotFoundError
+
+import pytest
+
+import superhumandoc_mcp
+from superhumandoc_mcp import running_version
 from superhumandoc_mcp.config import Config, format_startup_line
 
 
@@ -72,3 +78,39 @@ def test_the_sources_field_is_sorted_rather_than_insertion_ordered() -> None:
         "[SHDOC_API_KEY=environment SHDOC_DOC_ID=file SHDOC_LOG_LEVEL=file]"
         in line
     )
+
+
+def test_names_the_running_version() -> None:
+    """A bug report that cannot say which build produced it has to be
+    reproduced before it can be read."""
+    line = format_startup_line(_config(), version="9.8.7")
+    assert "version=9.8.7 " in line
+
+
+def test_the_version_is_derived_from_installed_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Derived, not hardcoded, and asked for by the right distribution name.
+
+    A fake value is what proves the derivation: a constant that happened to
+    equal today's release would pass a comparison against the real metadata.
+    The lookup raises KeyError for any name but the distribution's own.
+    """
+    monkeypatch.setattr(
+        superhumandoc_mcp, "version", lambda name: {"superhumandoc-mcp": "4.5.6"}[name]
+    )
+    assert "version=4.5.6 " in format_startup_line(_config())
+
+
+def test_a_missing_version_degrades_to_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An uninstalled source tree has no metadata. That is no reason to
+    refuse to serve, so the version reads `unknown` rather than raising."""
+
+    def _uninstalled(_name: str) -> str:
+        raise PackageNotFoundError("superhumandoc-mcp")
+
+    monkeypatch.setattr(superhumandoc_mcp, "version", _uninstalled)
+    assert running_version() == "unknown"
+    assert "version=unknown " in format_startup_line(_config())

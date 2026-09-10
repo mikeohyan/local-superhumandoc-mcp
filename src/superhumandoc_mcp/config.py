@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from dotenv import dotenv_values
 
+from superhumandoc_mcp import running_version
+
 if TYPE_CHECKING:
     # Type-checking only: the client imports Config from here, so importing it
     # back at runtime would be a cycle.
@@ -175,7 +177,9 @@ def load_config(
 
 
 def format_startup_line(
-    config: Config, identity: "TokenIdentity | None" = None
+    config: Config,
+    identity: "TokenIdentity | None" = None,
+    version: str | None = None,
 ) -> str:
     """One line to stderr at startup.
 
@@ -187,7 +191,12 @@ def format_startup_line(
     `identity` is None whenever `whoami` could not establish one, which the
     `failure-policy` topic makes a normal startup rather than a failure: the
     line then says the scope is unknown and the server serves anyway.
+
+    `version` is resolved here when not given, so every caller reports the
+    running build without having to remember to; a test passes one to pin it.
+    It leads the line because it is the first thing a bug report needs.
     """
+    version = version if version is not None else running_version()
     sources = " ".join(f"{key}={origin}" for key, origin in sorted(config.sources.items()))
     state = "ON" if config.allow_destructive else "off"
     if identity is None:
@@ -196,6 +205,6 @@ def format_startup_line(
         scope = "scoped" if identity.scoped else "unscoped"
         token = f"token: {identity.name or 'unnamed'} ({scope})"
     return (
-        f"superhumandoc-mcp: env={config.env_file} doc={config.doc_id} "
-        f"{token} destructive tools: {state} [{sources}]"
+        f"superhumandoc-mcp: version={version} env={config.env_file} "
+        f"doc={config.doc_id} {token} destructive tools: {state} [{sources}]"
     )
